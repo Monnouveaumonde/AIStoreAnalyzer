@@ -1,0 +1,467 @@
+generator client {
+  provider = "prisma-client-js"
+  // Prisma Accelerate : active le support du protocole prisma+postgres://
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // directUrl est utilisé pour les migrations (connexion directe à la DB)
+  // En production Accelerate, laissez directUrl vide ou pointez vers la DB directe
+  // directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+
+  @@index([shop])
+}
+
+model Shop {
+  id              String    @id @default(cuid())
+  shopDomain      String    @unique
+  shopName        String?
+  email           String?
+  accessToken     String?
+  plan            Plan      @default(FREE)
+  analysisCount   Int       @default(0)
+  monthlyReset    DateTime  @default(now())
+  installedAt     DateTime  @default(now())
+  uninstalledAt   DateTime?
+  isActive        Boolean   @default(true)
+
+  analyses        Analysis[]
+  subscription    Subscription?
+
+  // Competitive Watcher
+  watchedProducts WatchedProduct[]
+  priceAlerts     PriceAlert[]
+
+  // SEO Optimizer
+  seoScans        SeoScan[]
+  seoOptimizations SeoOptimization[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([shopDomain])
+}
+
+model Analysis {
+  id              String    @id @default(cuid())
+  shopId          String
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  overallScore    Float     @default(0)
+  seoScore        Float     @default(0)
+  speedScore      Float     @default(0)
+  productScore    Float     @default(0)
+  conversionScore Float     @default(0)
+  uxScore         Float     @default(0)
+  trustScore      Float     @default(0)
+  pricingScore    Float     @default(0)
+
+  seoDetails        Json?
+  speedDetails      Json?
+  productDetails    Json?
+  conversionDetails Json?
+  uxDetails         Json?
+  trustDetails      Json?
+  pricingDetails    Json?
+
+  opportunities     Opportunity[]
+  recommendations   Recommendation[]
+
+  aiInsights      String?   @db.Text
+  status          AnalysisStatus @default(PENDING)
+  shareSlug       String?   @unique
+  isPublic        Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([shopId])
+  @@index([shareSlug])
+  @@index([createdAt])
+}
+
+model Opportunity {
+  id              String    @id @default(cuid())
+  analysisId      String
+  analysis        Analysis  @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  type            OpportunityType
+  title           String
+  description     String    @db.Text
+  estimatedImpact String
+  impactPercent   Float     @default(0)
+  priority        Priority  @default(MEDIUM)
+  category        String
+
+  createdAt       DateTime  @default(now())
+
+  @@index([analysisId])
+}
+
+model Recommendation {
+  id              String    @id @default(cuid())
+  analysisId      String
+  analysis        Analysis  @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  category        String
+  title           String
+  description     String    @db.Text
+  actionSteps     Json
+  difficulty      Difficulty @default(MEDIUM)
+  impact          Impact     @default(MEDIUM)
+  isCompleted     Boolean    @default(false)
+
+  createdAt       DateTime  @default(now())
+
+  @@index([analysisId])
+}
+
+model Subscription {
+  id              String    @id @default(cuid())
+  shopId          String    @unique
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  shopifyChargeId String?
+  plan            Plan      @default(FREE)
+  status          SubscriptionStatus @default(ACTIVE)
+
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model BenchmarkData {
+  id              String    @id @default(cuid())
+  category        String
+  metric          String
+  averageValue    Float
+  medianValue     Float
+  topPercentile   Float
+  sampleSize      Int
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([category, metric])
+}
+
+// ─── MODULE: Competitive Watcher ─────────────────────────────────────────────
+
+// Produit concurrent suivi par un marchand
+model WatchedProduct {
+  id              String    @id @default(cuid())
+  shopId          String
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  // Produit côté marchand (Shopify product ID)
+  shopifyProductId  String
+  shopifyProductTitle String
+
+  // URL du produit concurrent à surveiller
+  competitorUrl     String    @db.Text
+  competitorName    String
+  competitorDomain  String
+
+  // Dernier prix constaté chez le concurrent
+  lastPrice         Float?
+  lastCurrency      String    @default("EUR")
+  lastCheckedAt     DateTime?
+
+  // Prix actuel du marchand pour comparaison
+  myCurrentPrice    Float?
+
+  isActive          Boolean   @default(true)
+
+  priceHistory      PriceSnapshot[]
+  alerts            PriceAlert[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([shopId])
+  @@index([competitorDomain])
+}
+
+// Historique des prix observés chez un concurrent (1 entrée par check)
+model PriceSnapshot {
+  id                String    @id @default(cuid())
+  watchedProductId  String
+  watchedProduct    WatchedProduct @relation(fields: [watchedProductId], references: [id], onDelete: Cascade)
+
+  price             Float
+  currency          String    @default("EUR")
+  hasPromotion      Boolean   @default(false)
+  promotionLabel    String?   // ex: "Soldes -20%", "Flash sale"
+  originalPrice     Float?    // Prix avant promo
+  source            String    @default("scrape") // "scrape" | "api"
+
+  capturedAt        DateTime  @default(now())
+
+  @@index([watchedProductId])
+  @@index([capturedAt])
+}
+
+// Alerte générée quand un concurrent change son prix ou lance une promo
+model PriceAlert {
+  id                String    @id @default(cuid())
+  shopId            String
+  shop              Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  watchedProductId  String
+  watchedProduct    WatchedProduct @relation(fields: [watchedProductId], references: [id], onDelete: Cascade)
+
+  alertType         PriceAlertType
+  oldPrice          Float?
+  newPrice          Float
+  priceDiffPercent  Float     @default(0)  // ex: -15.5 = baisse de 15.5%
+
+  title             String
+  message           String    @db.Text
+  suggestion        String?   @db.Text     // Suggestion IA de réaction
+
+  isRead            Boolean   @default(false)
+  emailSent         Boolean   @default(false)
+
+  createdAt         DateTime  @default(now())
+
+  @@index([shopId])
+  @@index([watchedProductId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+// ─── MODULE: SEO Optimizer ────────────────────────────────────────────────────
+
+// Résultat d'un scan SEO complet d'une boutique
+model SeoScan {
+  id              String    @id @default(cuid())
+  shopId          String
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  overallScore    Float     @default(0)
+  status          SeoScanStatus @default(PENDING)
+
+  // Résumé des problèmes détectés
+  totalIssues     Int       @default(0)
+  criticalIssues  Int       @default(0)
+  warningIssues   Int       @default(0)
+
+  // Détails JSON par catégorie
+  metaDetails     Json?     // Analyse meta titles/descriptions
+  headingDetails  Json?     // Analyse H1/H2
+  altTextDetails  Json?     // Images sans alt text
+  duplicateDetails Json?    // Contenus dupliqués
+  structureDetails Json?    // Structure URLs, canonicals
+
+  seoIssues       SeoIssue[]
+  optimizations   SeoOptimization[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([shopId])
+  @@index([createdAt])
+}
+
+// Problème SEO individuel détecté lors d'un scan
+model SeoIssue {
+  id              String    @id @default(cuid())
+  seoScanId       String
+  seoScan         SeoScan   @relation(fields: [seoScanId], references: [id], onDelete: Cascade)
+
+  issueType       SeoIssueType
+  severity        SeoSeverity @default(WARNING)
+  category        String    // "meta", "heading", "alt", "duplicate", "structure"
+
+  // Ressource concernée
+  resourceType    String    // "product", "page", "collection", "blog"
+  resourceId      String    // Shopify GID
+  resourceTitle   String
+  resourceUrl     String?
+
+  // Description du problème
+  description     String    @db.Text
+  currentValue    String?   @db.Text  // Valeur actuelle (meta title trop courte, etc.)
+  suggestedValue  String?   @db.Text  // Valeur suggérée par l'IA
+  aiGenerated     Boolean   @default(false)
+
+  isFixed         Boolean   @default(false)
+  fixedAt         DateTime?
+
+  createdAt       DateTime  @default(now())
+
+  @@index([seoScanId])
+  @@index([issueType])
+  @@index([isFixed])
+}
+
+// Optimisation appliquée (historique des actions prises)
+model SeoOptimization {
+  id              String    @id @default(cuid())
+  seoScanId       String
+  seoScan         SeoScan   @relation(fields: [seoScanId], references: [id], onDelete: Cascade)
+  shopId          String
+  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  issueType       SeoIssueType
+  resourceType    String
+  resourceId      String
+  resourceTitle   String
+
+  fieldName       String    // "metaTitle", "metaDescription", "altText", etc.
+  oldValue        String?   @db.Text
+  newValue        String    @db.Text
+  appliedByAi     Boolean   @default(false)
+  appliedAt       DateTime  @default(now())
+
+  shopifyMutationSuccess Boolean @default(false)
+
+  @@index([seoScanId])
+  @@index([shopId])
+}
+
+enum Plan {
+  FREE
+  PRO
+  GROWTH
+}
+
+enum AnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum OpportunityType {
+  MISSING_BUNDLES
+  MISSING_UPSELLS
+  WEAK_DESCRIPTIONS
+  MISSING_TRUST_BADGES
+  MISSING_REVIEWS
+  PRICING_OPTIMIZATION
+  SEO_IMPROVEMENT
+  SPEED_OPTIMIZATION
+  UX_IMPROVEMENT
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum Impact {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  FROZEN
+  EXPIRED
+}
+
+enum PriceAlertType {
+  PRICE_DROP        // Le concurrent a baissé son prix
+  PRICE_INCREASE    // Le concurrent a augmenté son prix
+  PROMOTION_STARTED // Le concurrent a lancé une promo
+  PROMOTION_ENDED   // La promo du concurrent est terminée
+  NEW_COMPETITOR    // Nouveau concurrent détecté sur le même produit
+}
+
+enum SeoScanStatus {
+  PENDING
+  SCANNING
+  COMPLETED
+  FAILED
+}
+
+enum SeoIssueType {
+  MISSING_META_TITLE
+  META_TITLE_TOO_SHORT
+  META_TITLE_TOO_LONG
+  DUPLICATE_META_TITLE
+  MISSING_META_DESCRIPTION
+  META_DESCRIPTION_TOO_SHORT
+  META_DESCRIPTION_TOO_LONG
+  DUPLICATE_META_DESCRIPTION
+  MISSING_H1
+  MULTIPLE_H1
+  MISSING_ALT_TEXT
+  DUPLICATE_CONTENT
+  MISSING_CANONICAL
+  THIN_CONTENT
+}
+
+enum SeoSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+// ─── Modèles de base pour tests de connexion et intégration ──────────────────
+
+// Représente une boutique trackée (modèle simplifié pour intégrations tierces)
+model Store {
+  id          String       @id @default(cuid())
+  shop        String       @unique  // domaine myshopify ex: my-store.myshopify.com
+  createdAt   DateTime     @default(now())
+
+  competitors Competitor[]
+  seoAudits   SeoAudit[]
+
+  @@index([shop])
+}
+
+// Concurrent suivi pour une boutique (modèle simplifié)
+model Competitor {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  url       String               // URL du concurrent (ex: https://concurrent.com)
+  createdAt DateTime @default(now())
+
+  @@index([storeId])
+}
+
+// Audit SEO associé à une boutique (modèle simplifié)
+model SeoAudit {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  score     Float    @default(0)    // Score SEO entre 0 et 100
+  report    Json?                   // JSON libre : résultats détaillés de l'audit
+  createdAt DateTime @default(now())
+
+  @@index([storeId])
+  @@index([createdAt])
+}

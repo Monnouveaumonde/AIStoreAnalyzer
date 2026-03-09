@@ -1,0 +1,46 @@
+# Shopify App Configuration
+# https://shopify.dev/docs/apps/tools/cli/configuration
+# ⚠️  Remplacer YOUR_CLIENT_ID et les URLs par vos vraies valeurs avant déploiement
+
+name = "AI Store Analyzer"
+client_id = "YOUR_CLIENT_ID"
+application_url = "https://your-app-url.up.railway.app"
+embedded = true
+
+[access_scopes]
+# Scopes identiques au fichier .env (SCOPES=)
+scopes = "read_products,read_orders,read_themes,read_content,read_discounts,read_price_rules"
+
+[auth]
+redirect_urls = [
+  "https://your-app-url.up.railway.app/auth/callback",
+  "https://your-app-url.up.railway.app/auth/shopify/callback",
+  "https://your-app-url.up.railway.app/api/auth/callback"
+]
+
+[webhooks]
+# January25 = version API la plus récente — à synchroniser avec shopify.server.ts
+api_version = "2025-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = [ "shop/update" ]
+  uri = "/webhooks"
+
+  # Webhooks GDPR obligatoires pour l'App Store
+  [[webhooks.subscriptions]]
+  topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+  uri = "/webhooks"
+  compliance_topics = true
+
+[app_store]
+# URLs requises pour la soumission App Store Shopify
+# ⚠️  Remplacer your-app-url par votre vraie URL Railway après déploiement
+privacy_policy = "https://your-app-url.up.railway.app/privacy"
+support_url    = "https://your-app-url.up.railway.app/support"
+
+[pos]
+embedded = false

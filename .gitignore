@@ -1,0 +1,9 @@
+node_modules/
+build/
+.cache/
+.env
+*.log
+coverage/
+.DS_Store
+dist/
+.shopify/
