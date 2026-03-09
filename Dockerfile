@@ -13,6 +13,9 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Créer public si absent (Remix/Vite n'en crée pas toujours)
+RUN mkdir -p public
+
 # Génération du client Prisma (nécessaire avant le build Remix)
 RUN npx prisma generate --no-engine
 
