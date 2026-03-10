@@ -40,5 +40,5 @@ COPY --from=builder /app/prisma ./prisma
 EXPOSE 3000
 
 # Schema : migrate deploy ; si P3005 (base non vide), db push en secours
-# server.js écoute sur 0.0.0.0:PORT pour Railway
-CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && npm run start"]
+# NODE_ENV=production obligatoire pour éviter broadcastDevReady (Dev server origin not set)
+CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && NODE_ENV=production npm run start"]
