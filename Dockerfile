@@ -40,4 +40,6 @@ COPY --from=builder /app/prisma ./prisma
 EXPOSE 3000
 
 # Schema : migrate deploy ; si P3005 (base non vide), db push en secours
-CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && npm run start"]
+# HOST=0.0.0.0 : remix-serve doit écouter sur toutes les interfaces (Railway)
+# HOST en Railway = URL de l'app pour Shopify → ne pas l'utiliser pour le bind
+CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && HOST=0.0.0.0 npm run start"]
