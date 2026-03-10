@@ -39,5 +39,5 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
 
-# Lance les migrations puis démarre le serveur
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+# Schema : migrate deploy ; si P3005 (base non vide), db push en secours
+CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && npm run start"]
