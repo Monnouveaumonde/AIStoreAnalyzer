@@ -22,7 +22,8 @@ RUN mkdir -p public
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 
 # Génération du client Prisma (nécessaire avant le build Remix)
-RUN npx prisma generate --no-engine
+# Sans --no-engine : moteur inclus pour connexion directe postgresql://
+RUN npx prisma generate
 
 # Build Remix
 RUN npm run build
