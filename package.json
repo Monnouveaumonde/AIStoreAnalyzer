@@ -10,7 +10,7 @@
     "generate": "shopify app generate",
     "deploy": "shopify app deploy",
     "setup": "prisma generate && prisma migrate deploy",
-    "start": "node server.js",
+    "start": "HOST=0.0.0.0 remix-serve ./build/server/index.js",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
     "prisma": "prisma",
