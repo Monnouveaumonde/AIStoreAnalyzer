@@ -38,7 +38,8 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 
-EXPOSE 3000
+# Railway injecte PORT (souvent 8080) — l'app doit écouter dessus
+EXPOSE 8080
 
 # Schema : migrate deploy ; si P3005 (base non vide), db push en secours
 # NODE_ENV=production obligatoire pour éviter broadcastDevReady (Dev server origin not set)
