@@ -9,9 +9,8 @@ application_url = "https://aistoreanalyzer-production.up.railway.app"
 embedded = true
 
 [access_scopes]
-# Scopes identiques au fichier .env (SCOPES=)
-# Ordre identique à Shopify Partners (manifest) — SCOPES sur Railway doit être EXACTEMENT pareil
 scopes = "read_content,read_discounts,read_orders,read_price_rules,read_products,read_themes"
+use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
