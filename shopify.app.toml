@@ -31,17 +31,9 @@ api_version = "2025-01"
   topics = [ "shop/update" ]
   uri = "/webhooks"
 
-  # Webhooks GDPR obligatoires pour l'App Store
+  # Webhooks GDPR obligatoires pour l'App Store (compliance_topics uniquement, pas topics)
   [[webhooks.subscriptions]]
-  topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
   uri = "/webhooks"
-  compliance_topics = true
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 
-[app_store]
-# URLs requises pour la soumission App Store Shopify
-# ⚠️  Remplacer your-app-url par votre vraie URL Railway après déploiement
-privacy_policy = "https://aistoreanalyzer-production.up.railway.app/privacy"
-support_url    = "https://aistoreanalyzer-production.up.railway.app/support"
-
-[pos]
-embedded = false
+# app_store et pos : configurer dans Partners Dashboard si besoin
