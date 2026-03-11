@@ -1,14 +1,15 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { login } from "../shopify.server";
+import { LoaderFunctionArgs, redirect } from "@remix-run/node";
+import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  return login(request);
-};
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop");
 
-export default function Index() {
-  return (
-    <div style={{ fontFamily: "system-ui", padding: "2rem", textAlign: "center" }}>
-      <p>Veuillez lancer l&apos;application depuis votre interface Shopify Admin.</p>
-    </div>
-  );
-}
+  // Si on a le paramètre shop, on redirige DIRECTEMENT vers /app
+  // avec tous les paramètres (hmac, host, etc.)
+  if (shop) {
+    return redirect(`/app?${url.searchParams.toString()}`);
+  }
+
+  return new Response("Veuillez lancer l'application depuis Shopify", { status: 200 });
+};
