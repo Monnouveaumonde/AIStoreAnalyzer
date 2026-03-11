@@ -6,7 +6,7 @@ name = "ShopPulseAi"
 client_id = "0c5ba79c6026f7b1a5915201ee6891a4"
 application_url = "https://aistoreanalyzer-production.up.railway.app"
 # false = app en nouvel onglet (évite accounts.shopify.com et admin.shopify.com dans iframe)
-embedded = true
+embedded = false
 
 [access_scopes]
 # Scopes identiques au fichier .env (SCOPES=)
