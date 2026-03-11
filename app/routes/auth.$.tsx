@@ -1,10 +1,10 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 
+// Cette route gère le callback OAuth de Shopify.
+// authenticate.admin traite le code d'autorisation et redirige vers /app.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  if (session) return redirect("/app");
+  await authenticate.admin(request);
   return null;
 };
 

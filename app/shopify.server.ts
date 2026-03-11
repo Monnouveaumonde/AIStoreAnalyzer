@@ -14,14 +14,14 @@ const shopify = shopifyApp({
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   // January25 = API version stable la plus récente (2025-01)
   apiVersion: ApiVersion.January25,
-  scopes: process.env.SCOPES?.split(","),
+  scopes: (process.env.SCOPES?.split(",") ?? []).map((s) => s.trim()).filter(Boolean),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   // On passe le client PrismaClient pur — compatible avec PrismaSessionStorage
   sessionStorage: new PrismaSessionStorage(prismaSession),
   distribution: AppDistribution.AppStore,
   future: {
-    unstable_newEmbeddedAuthStrategy: true,
+    unstable_newEmbeddedAuthStrategy: false,
     removeRest: false,
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
