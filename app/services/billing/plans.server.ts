@@ -67,7 +67,7 @@ export async function createSubscription(
     }
   `, {
     variables: {
-      name: `AI Store Analyzer - ${planConfig.name}`,
+      name: `ShopPulseAi - ${planConfig.name}`,
       lineItems: [
         {
           plan: {

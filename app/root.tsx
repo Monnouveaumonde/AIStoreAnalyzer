@@ -44,7 +44,7 @@ export function ErrorBoundary() {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <title>Erreur - AI Store Analyzer</title>
+        <title>Erreur - ShopPulseAi</title>
       </head>
       <body style={{ fontFamily: "system-ui", padding: "2rem", maxWidth: "600px", margin: "0 auto" }}>
         <h1>Application Error</h1>

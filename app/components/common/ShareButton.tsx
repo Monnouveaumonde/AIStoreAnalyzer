@@ -18,7 +18,7 @@ export function ShareButton({ shareSlug, appUrl = "" }: ShareButtonProps) {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: "Mon Store Score — AI Store Analyzer",
+          title: "Mon Store Score — ShopPulseAi",
           text: "Découvrez le score de ma boutique Shopify et les opportunités de revenus !",
           url,
         });

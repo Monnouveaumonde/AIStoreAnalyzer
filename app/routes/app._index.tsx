@@ -107,7 +107,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   return (
-    <Page title="AI Store Analyzer" subtitle={`${shop.name || shop.domain}`}>
+    <Page title="ShopPulseAi" subtitle={`${shop.name || shop.domain}`}>
       <BlockStack gap="500">
         <Banner tone="info">
           <InlineStack gap="200" align="space-between" blockAlign="center">
@@ -128,7 +128,7 @@ export default function Dashboard() {
               <Card>
                 <BlockStack gap="400" align="center" inlineAlign="center">
                   <Text variant="headingLg" as="h2">
-                    Bienvenue dans AI Store Analyzer
+                    Bienvenue dans ShopPulseAi
                   </Text>
                   <Text variant="bodyMd" as="p" tone="subdued">
                     Lancez votre première analyse pour obtenir votre Store Score et

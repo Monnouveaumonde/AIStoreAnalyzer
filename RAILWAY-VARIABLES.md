@@ -2,7 +2,7 @@
 
 ## Où ajouter les variables
 
-1. Ouvrez [railway.app](https://railway.app) → votre projet **AI Store Analyzer**
+1. Ouvrez [railway.app](https://railway.app) → votre projet **ShopPulseAi**
 2. Cliquez sur votre **service** (le conteneur Docker)
 3. Onglet **Variables** (ou **Settings** → **Variables**)
 
@@ -23,9 +23,9 @@
 | `APP_URL` | `https://VOTRE-URL.up.railway.app` | **Identique à HOST** |
 | `NODE_ENV` | `production` | Toujours `production` en prod |
 
-#### Valeur pour SCOPES (copier-coller)
+#### Valeur pour SCOPES (copier-coller — doit correspondre EXACTEMENT à shopify.app.toml)
 ```
-read_products,read_orders,read_themes,read_content,read_discounts,read_price_rules
+read_content,read_discounts,read_orders,read_price_rules,read_products,read_themes
 ```
 
 ---
@@ -76,7 +76,7 @@ postgresql://postgres:MOT_DE_PASSE@containers-us-west-xxx.railway.app:5432/railw
 DATABASE_URL=postgresql://postgres:<MOT_DE_PASSE>@<HOST>.railway.app:5432/railway
 SHOPIFY_API_KEY=<VOTRE_CLIENT_ID>
 SHOPIFY_API_SECRET=<VOTRE_CLIENT_SECRET>
-SCOPES=read_products,read_orders,read_themes,read_content,read_discounts,read_price_rules
+SCOPES=read_content,read_discounts,read_orders,read_price_rules,read_products,read_themes
 HOST=0.0.0.0
 SHOPIFY_APP_URL=https://<VOTRE-PROJECT>.up.railway.app
 APP_URL=https://<VOTRE-PROJECT>.up.railway.app

@@ -9,12 +9,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const score = Math.round(data.analysis.overallScore);
   const shop = data.analysis.shopName;
   return [
-    { title: `Store Score: ${score}/100 — ${shop} | AI Store Analyzer` },
+    { title: `Store Score: ${score}/100 — ${shop} | ShopPulseAi` },
     {
       name: "description",
       content: `Analyse complète de ${shop}: Score ${score}/100. Découvrez les opportunités de revenus et améliorez votre boutique Shopify.`,
     },
-    { property: "og:title", content: `${shop} a obtenu ${score}/100 sur AI Store Analyzer` },
+    { property: "og:title", content: `${shop} a obtenu ${score}/100 sur ShopPulseAi` },
     {
       property: "og:description",
       content: `${data.analysis.opportunityCount} opportunités de revenus détectées. Analysez votre boutique gratuitement !`,
@@ -107,7 +107,7 @@ export default function PublicReport() {
         <div className="report-container">
           {/* Header */}
           <header className="report-header">
-            <div className="logo">AI Store Analyzer</div>
+            <div className="logo">ShopPulseAi</div>
             <p className="subtitle">Rapport d'analyse Shopify</p>
           </header>
 
@@ -186,7 +186,7 @@ export default function PublicReport() {
           <section className="cta-section">
             <h2>Corrigez automatiquement ces problèmes</h2>
             <p>
-              Installez AI Store Analyzer et obtenez un coaching IA personnalisé
+              Installez ShopPulseAi et obtenez un coaching IA personnalisé
               avec des actions concrètes pour booster vos ventes.
             </p>
             <a
@@ -209,7 +209,7 @@ export default function PublicReport() {
                 month: "long",
                 year: "numeric",
               })}{" "}
-              par AI Store Analyzer
+              par ShopPulseAi
             </p>
           </footer>
         </div>

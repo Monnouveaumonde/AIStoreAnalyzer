@@ -2,7 +2,7 @@
   "name": "ai-store-analyzer",
   "version": "1.0.0",
   "private": true,
-  "description": "Shopify App - AI Store Analyzer: Analyse complète de boutiques Shopify avec scoring IA",
+  "description": "Shopify App - ShopPulseAi: Analyse complète de boutiques Shopify avec scoring IA",
   "scripts": {
     "build": "remix vite:build",
     "dev": "shopify app dev",
@@ -36,7 +36,7 @@
     "@shopify/app-bridge-react": "^4.1.2",
     "@shopify/polaris": "^13.9.0",
     "@shopify/shopify-app-remix": "^3.2.0",
-    "@shopify/shopify-app-session-storage-prisma": "^3.0.0",
+    "@shopify/shopify-app-session-storage-prisma": "^5.2.3",
     "cheerio": "^1.0.0",
     "html-pdf-node": "^1.0.8",
     "isbot": "^5.1.14",

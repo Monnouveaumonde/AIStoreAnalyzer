@@ -6,7 +6,7 @@
 import type { MetaFunction } from "@remix-run/node";
 
 export const meta: MetaFunction = () => [
-  { title: "Politique de confidentialité — AI Store Analyzer" },
+  { title: "Politique de confidentialité — ShopPulseAi" },
   { name: "robots", content: "index, follow" },
 ];
 
@@ -42,12 +42,12 @@ export default function PrivacyPolicy() {
       </head>
       <body>
         <div className="container">
-          <div className="badge">AI Store Analyzer</div>
+          <div className="badge">ShopPulseAi</div>
           <h1>Politique de confidentialité</h1>
           <p>Dernière mise à jour : Mars 2026</p>
 
           <h2>1. Données collectées</h2>
-          <p>AI Store Analyzer collecte uniquement les données nécessaires au fonctionnement de l'application :</p>
+          <p>ShopPulseAi collecte uniquement les données nécessaires au fonctionnement de l'application :</p>
           <ul>
             <li>Le domaine de votre boutique Shopify (identifiant unique)</li>
             <li>Les métadonnées de vos produits, pages et collections (lecture seule via API Shopify)</li>
@@ -91,7 +91,7 @@ export default function PrivacyPolicy() {
           </ul>
 
           <div className="footer">
-            <p>© 2026 AI Store Analyzer — Tous droits réservés</p>
+            <p>© 2026 ShopPulseAi — Tous droits réservés</p>
           </div>
         </div>
       </body>

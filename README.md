@@ -1,4 +1,4 @@
-# AI Store Analyzer — Shopify App
+# ShopPulseAi — Shopify App
 
 Application Shopify embedded qui analyse les boutiques et génère un **Store Score (0-100)** avec coaching IA et détection d'opportunités de revenus.
 

@@ -6,7 +6,7 @@
 import type { MetaFunction } from "@remix-run/node";
 
 export const meta: MetaFunction = () => [
-  { title: "Support — AI Store Analyzer" },
+  { title: "Support — ShopPulseAi" },
   { name: "robots", content: "index, follow" },
 ];
 
@@ -53,7 +53,7 @@ export default function SupportPage() {
       </head>
       <body>
         <div className="container">
-          <div className="badge">AI Store Analyzer</div>
+          <div className="badge">ShopPulseAi</div>
           <h1>Centre de support</h1>
           <p>Besoin d'aide ? Nous sommes là pour vous.</p>
 
@@ -117,7 +117,7 @@ export default function SupportPage() {
           <p>Oui. Aucune donnée client n'est stockée. Toutes les données sont chiffrées. Voir notre <a href="/privacy">politique de confidentialité</a>.</p>
 
           <div className="footer">
-            <p>© 2026 AI Store Analyzer — <a href="/privacy">Confidentialité</a></p>
+            <p>© 2026 ShopPulseAi — <a href="/privacy">Confidentialité</a></p>
           </div>
         </div>
       </body>
