@@ -32,15 +32,21 @@ RUN npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 
+# Copier node_modules complet depuis le builder (inclut .prisma/client avec le binaire engine)
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 
+# Regénérer le client Prisma dans l'image runner (même architecture Alpine)
+# Nécessaire pour que le binaire query-engine corresponde à l'OS de production
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+RUN npx prisma generate
+ENV DATABASE_URL=""
+
 # Railway injecte PORT (souvent 8080) — l'app doit écouter dessus
 EXPOSE 8080
 
-# Schema : migrate deploy ; si P3005 (base non vide), db push en secours
-# NODE_ENV=production obligatoire pour éviter broadcastDevReady (Dev server origin not set)
-CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push) && NODE_ENV=production npm run start"]
+# migrate deploy puis démarrage — si la table _prisma_migrations n'existe pas, db push en secours
+CMD ["sh", "-c", "(npx prisma migrate deploy || npx prisma db push --accept-data-loss) && NODE_ENV=production npm run start"]
