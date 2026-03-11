@@ -5,19 +5,15 @@ import {
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
-// prismaSession = PrismaClient pur (sans extension Accelerate)
-// requis par PrismaSessionStorage qui attend le type PrismaClient exact
 import { prismaSession } from "./db.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
-  // January25 = API version stable la plus récente (2025-01)
   apiVersion: ApiVersion.January25,
   scopes: (process.env.SCOPES?.split(",") ?? []).map((s) => s.trim()).filter(Boolean),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  // On passe le client PrismaClient pur — compatible avec PrismaSessionStorage
   sessionStorage: new PrismaSessionStorage(prismaSession),
   distribution: AppDistribution.AppStore,
   future: {
