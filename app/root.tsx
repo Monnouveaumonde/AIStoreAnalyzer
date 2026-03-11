@@ -34,9 +34,9 @@ export default function App() {
 export function ErrorBoundary() {
   const error = useRouteError();
   const message = isRouteErrorResponse(error)
-    ? `${error.status} ${error.statusText}`
+    ? `${error.status} ${error.statusText}`.trim() || "Erreur HTTP"
     : error instanceof Error
-      ? error.message
+      ? (error.message || "Une erreur est survenue")
       : "Une erreur est survenue";
 
   return (

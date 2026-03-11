@@ -17,13 +17,15 @@ import { useState } from "react";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const errors = login(request);
-  return json({ errors, polarisTranslations: require("@shopify/polaris/locales/en.json") });
+  const result = login(request);
+  if (result instanceof Response) return result;
+  return json({ errors: result, polarisTranslations: require("@shopify/polaris/locales/en.json") });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const errors = login(request);
-  return json({ errors });
+  const result = login(request);
+  if (result instanceof Response) return result;
+  return json({ errors: result });
 };
 
 export default function Auth() {
