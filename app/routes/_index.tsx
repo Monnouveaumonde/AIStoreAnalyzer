@@ -7,7 +7,7 @@ import { redirect } from "@remix-run/node";
 import { login } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const result = login(request);
+  const result = await login(request);
   if (result instanceof Response) return result;
   return redirect("/auth/login");
 };

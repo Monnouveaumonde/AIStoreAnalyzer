@@ -10,6 +10,7 @@ import {
   Text,
   TextField,
 } from "@shopify/polaris";
+import polarisTranslations from "@shopify/polaris/locales/en.json";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import { login } from "../../shopify.server";
 import { useState } from "react";
@@ -17,13 +18,13 @@ import { useState } from "react";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const result = login(request);
+  const result = await login(request);
   if (result instanceof Response) return result;
-  return json({ errors: result, polarisTranslations: require("@shopify/polaris/locales/en.json") });
+  return json({ errors: result, polarisTranslations });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const result = login(request);
+  const result = await login(request);
   if (result instanceof Response) return result;
   return json({ errors: result });
 };
