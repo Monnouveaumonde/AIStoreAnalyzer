@@ -5,8 +5,8 @@
 name = "AI Store Analyzer"
 client_id = "0c5ba79c6026f7b1a5915201ee6891a4"
 application_url = "https://aistoreanalyzer-production.up.railway.app"
-# false = app en nouvel onglet (évite X-Frame-Options). Remettre true pour l'App Store.
-embedded = false
+# true = app dans l'iframe admin. On traite id_token à la racine pour éviter la boucle de redirect.
+embedded = true
 
 [access_scopes]
 # Scopes identiques au fichier .env (SCOPES=)
