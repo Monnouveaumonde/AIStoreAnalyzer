@@ -5,7 +5,10 @@ import {
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
-import { prismaSession } from "./db.server";
+import { PrismaClient } from "@prisma/client";
+
+// 👇 Crée le client Prisma connecté à ta DB Railway
+export const prismaSession = new PrismaClient();
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -13,10 +16,18 @@ const shopify = shopifyApp({
   apiVersion: ApiVersion.January25,
   scopes: (process.env.SCOPES?.split(",") ?? []).map((s) => s.trim()).filter(Boolean),
   appUrl: process.env.SHOPIFY_APP_URL || "",
+  
+  // 👇 tokens offline pour store test
   useOnlineTokens: false,
-  sessionStorage: new PrismaSessionStorage(prismaSession) as any,
+  
+  // 👇 session storage avec Prisma direct
+  sessionStorage: new PrismaSessionStorage(prismaSession),
+  
+  // 👇 App Store distribution
   distribution: AppDistribution.AppStore,
+  
   future: {
+    // 👇 Embedded Auth + stable Remix support
     unstable_newEmbeddedAuthStrategy: true,
     removeRest: false,
   },
