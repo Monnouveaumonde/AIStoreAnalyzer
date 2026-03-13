@@ -271,6 +271,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: false, error: "Boutique introuvable." }, { status: 404 });
     }
 
+    const existing = await prisma.watchedProduct.findFirst({
+      where: { shopId: shop.id, competitorDomain: urlObj.hostname },
+    });
+    if (existing) {
+      return json({ success: true, alreadyExists: true });
+    }
+
     let initialPrice: number | null = null;
     try {
       const scraped = await scrapeProductPrice(competitorUrl);
@@ -837,6 +844,7 @@ function CandidateRow({
   index,
   shopDomain,
   productTitle,
+  contextualAction,
   addedIds,
   onAdd,
 }: {
@@ -844,16 +852,34 @@ function CandidateRow({
   index: number;
   shopDomain: string;
   productTitle: string;
+  contextualAction: string;
   addedIds: Set<string>;
   onAdd: (c: any) => void;
 }) {
   const fetcher = useFetcher<{ success?: boolean; added?: boolean; error?: string; alreadyExists?: boolean }>();
   const isLoading = fetcher.state !== "idle";
   const isAdded = addedIds.has(candidate.domain) || (fetcher.data?.success && (fetcher.data?.added || fetcher.data?.alreadyExists));
+  const hasError = fetcher.data && "error" in fetcher.data && !!fetcher.data.error;
 
   const pColor = candidate.platform ? (PLATFORM_COLORS[candidate.platform] ?? "#637381") : "#637381";
   const confidenceLabel = candidate.confidence === "elevee" ? "Pertinence élevée" : candidate.confidence === "moyenne" ? "Pertinence moyenne" : "Pertinence faible";
   const scorePercent = Math.round((candidate.score ?? 0) * 100);
+
+  const effectiveTitle = productTitle || candidate.title || candidate.domain;
+
+  const handleSurveiller = () => {
+    fetcher.submit(
+      {
+        intent: "add_watch_manual",
+        shopDomain,
+        myProductTitle: effectiveTitle,
+        competitorName: candidate.domain,
+        competitorUrl: candidate.url,
+      },
+      { method: "post", action: contextualAction },
+    );
+    onAdd(candidate);
+  };
 
   return (
     <Box
@@ -864,6 +890,11 @@ function CandidateRow({
       background={isAdded ? "bg-fill-success-secondary" : "bg-surface"}
     >
       <BlockStack gap="200">
+        {hasError && (
+          <Banner tone="critical">
+            <Text as="p" variant="bodySm">{fetcher.data?.error}</Text>
+          </Banner>
+        )}
         <InlineStack align="space-between" blockAlign="start">
           <BlockStack gap="100">
             <InlineStack gap="200" blockAlign="center" wrap>
@@ -920,22 +951,14 @@ function CandidateRow({
             {isAdded ? (
               <Badge tone="success">Ajouté</Badge>
             ) : (
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="add_watch_manual" />
-                <input type="hidden" name="shopDomain" value={shopDomain} />
-                <input type="hidden" name="myProductTitle" value={productTitle} />
-                <input type="hidden" name="competitorName" value={candidate.domain} />
-                <input type="hidden" name="competitorUrl" value={candidate.url} />
-                <Button
-                  submit
-                  variant="primary"
-                  size="slim"
-                  loading={isLoading}
-                  onClick={() => onAdd(candidate)}
-                >
-                  Surveiller
-                </Button>
-              </fetcher.Form>
+              <Button
+                variant="primary"
+                size="slim"
+                loading={isLoading}
+                onClick={handleSurveiller}
+              >
+                Surveiller
+              </Button>
             )}
           </InlineStack>
         </InlineStack>
@@ -1253,6 +1276,7 @@ function AddCompetitorPanel({
                     index={idx}
                     shopDomain={shopDomain}
                     productTitle={selectedTitle}
+                    contextualAction={contextualAction}
                     addedIds={addedDomains}
                     onAdd={(added) => setAddedDomains((prev) => new Set([...prev, added.domain]))}
                   />
