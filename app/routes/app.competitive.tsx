@@ -62,6 +62,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             id
             title
             handle
+            variants(first: 1) {
+              edges {
+                node {
+                  price
+                }
+              }
+            }
           }
         }
       }
@@ -73,6 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       id: e?.node?.id,
       title: e?.node?.title,
       handle: e?.node?.handle,
+      price: parseFloat(e?.node?.variants?.edges?.[0]?.node?.price ?? "0") || null,
     })) ?? [];
 
   return json({
@@ -319,9 +327,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: false, error: "Sélectionnez un produit Shopify." }, { status: 400 });
     }
 
-    const [idPart, titlePart, handlePart] = packed.split("::");
+    const [idPart, titlePart, handlePart, pricePart] = packed.split("::");
     const title = decodeURIComponent(titlePart ?? "").trim();
     const handle = decodeURIComponent(handlePart ?? "").trim();
+    const shopifyPrice = parseFloat(pricePart ?? "0") || null;
     if (!idPart || !title) {
       return json({ success: false, error: "Produit Shopify invalide." }, { status: 400 });
     }
@@ -392,7 +401,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         competitorUrl: best.url,
         competitorName: best.domain,
         competitorDomain: urlObj.hostname,
-        myCurrentPrice: null,
+        myCurrentPrice: shopifyPrice,
         lastPrice: initialPrice,
         lastCheckedAt: initialPrice ? new Date() : null,
       },
@@ -487,9 +496,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-      const analysis = await analyzeCompetitivePage(watchedProduct.competitorUrl);
+      console.log(`[analyze] Lancement analyse pour ${watchedProduct.competitorUrl}`);
+      const analysis = await analyzeCompetitivePage({
+        competitorUrl: watchedProduct.competitorUrl,
+        own: {
+          title: watchedProduct.shopifyProductTitle,
+          price: watchedProduct.myCurrentPrice,
+        },
+      });
+      console.log(`[analyze] Résultat: prix=${analysis.price}, strengths=${analysis.strengths.length}, diagnostic=${analysis.diagnostic}`);
       return json({ success: true, analysis, watchedProductId });
     } catch (err) {
+      console.error(`[analyze] ERREUR:`, err);
       const msg = err instanceof Error ? err.message : "Impossible d'analyser la page concurrente.";
       return json({ success: false, analysisError: msg }, { status: 500 });
     }
@@ -844,6 +862,7 @@ function CandidateRow({
   index,
   shopDomain,
   productTitle,
+  myPrice,
   contextualAction,
   addedIds,
   onAdd,
@@ -852,6 +871,7 @@ function CandidateRow({
   index: number;
   shopDomain: string;
   productTitle: string;
+  myPrice: number | null;
   contextualAction: string;
   addedIds: Set<string>;
   onAdd: (c: any) => void;
@@ -868,16 +888,15 @@ function CandidateRow({
   const effectiveTitle = productTitle || candidate.title || candidate.domain;
 
   const handleSurveiller = () => {
-    fetcher.submit(
-      {
-        intent: "add_watch_manual",
-        shopDomain,
-        myProductTitle: effectiveTitle,
-        competitorName: candidate.domain,
-        competitorUrl: candidate.url,
-      },
-      { method: "post", action: contextualAction },
-    );
+    const data: Record<string, string> = {
+      intent: "add_watch_manual",
+      shopDomain,
+      myProductTitle: effectiveTitle,
+      competitorName: candidate.domain,
+      competitorUrl: candidate.url,
+    };
+    if (myPrice) data.myCurrentPrice = String(myPrice);
+    fetcher.submit(data, { method: "post", action: contextualAction });
     onAdd(candidate);
   };
 
@@ -1123,6 +1142,13 @@ function AddCompetitorPanel({
     return decodeURIComponent(titlePart ?? "").trim();
   })();
 
+  const selectedPrice = (() => {
+    if (manualMode || !selectedProduct) return null;
+    const parts = selectedProduct.split("::");
+    const p = parseFloat(parts[3] ?? "0");
+    return p > 0 ? p : null;
+  })();
+
   const inputStyle: React.CSSProperties = {
     minHeight: 40,
     border: "1px solid #c9cccf",
@@ -1200,9 +1226,9 @@ function AddCompetitorPanel({
                 {products.map((p: any) => (
                   <option
                     key={p.id}
-                    value={`${p.id}::${encodeURIComponent(p.title ?? "")}::${encodeURIComponent(p.handle ?? "")}`}
+                    value={`${p.id}::${encodeURIComponent(p.title ?? "")}::${encodeURIComponent(p.handle ?? "")}::${p.price ?? 0}`}
                   >
-                    {p.title}
+                    {p.title}{p.price ? ` (${p.price} €)` : ""}
                   </option>
                 ))}
               </select>
@@ -1276,6 +1302,7 @@ function AddCompetitorPanel({
                     index={idx}
                     shopDomain={shopDomain}
                     productTitle={selectedTitle}
+                    myPrice={selectedPrice}
                     contextualAction={contextualAction}
                     addedIds={addedDomains}
                     onAdd={(added) => setAddedDomains((prev) => new Set([...prev, added.domain]))}
