@@ -54,7 +54,7 @@ const EXCLUDED_DOMAINS = [
   "apple.com", "microsoft.com", "github.com",
   "w3.org", "stackoverflow.com", "medium.com",
   "about.com", "healthline.com", "nytimes.com",
-  "searx.", "search.",
+  "searx.", "serper.dev",
 ];
 
 function isDomainExcluded(domain: string, ownDomain?: string): boolean {
@@ -124,66 +124,58 @@ function scoreDomainStore(domain: string): number {
 
 type RawResult = { url: string; title: string; snippet: string; source: string };
 
-// ─── SearXNG (instances publiques, API JSON, pas de clé requise) ────────────
+// ════════════════════════════════════════════════════════════════════════════
+//  SOURCE PRIMAIRE : Serper.dev (Google Search API — 2500 req gratuites)
+// ════════════════════════════════════════════════════════════════════════════
 
-const SEARXNG_INSTANCES = [
-  "https://search.bus-hit.me",
-  "https://search.sapti.me",
-  "https://searx.tiekoetter.com",
-  "https://search.neet.works",
-  "https://searx.be",
-  "https://paulgo.io",
-];
-
-async function fetchSearXNG(query: string, instanceUrl: string): Promise<RawResult[]> {
+async function fetchSerper(query: string): Promise<RawResult[]> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) {
+    console.log("[discovery] SERPER_API_KEY manquante — configurez-la sur Railway");
+    return [];
+  }
   try {
-    const url = `${instanceUrl}/search?q=${encodeURIComponent(query)}&format=json&language=fr&categories=general`;
-    const res = await fetch(url, {
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
       headers: {
-        "Accept": "application/json",
-        "User-Agent": "ShopPulseAI/1.0",
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        q: query,
+        gl: "fr",
+        hl: "fr",
+        num: 30,
+      }),
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
-      console.log(`[discovery] SearXNG ${instanceUrl}: HTTP ${res.status}`);
+      console.log(`[discovery] Serper erreur HTTP: ${res.status} ${res.statusText}`);
       return [];
     }
     const data = await res.json();
     const results: RawResult[] = [];
-    for (const item of data.results ?? []) {
-      if (item.url && item.title) {
+    for (const item of data.organic ?? []) {
+      if (item.link) {
         results.push({
-          url: item.url,
-          title: item.title,
-          snippet: item.content ?? "",
-          source: "SearXNG",
+          url: item.link,
+          title: item.title ?? "",
+          snippet: item.snippet ?? "",
+          source: "Google",
         });
       }
     }
-    console.log(`[discovery] SearXNG ${instanceUrl}: ${results.length} résultat(s)`);
+    console.log(`[discovery] Serper (Google): ${results.length} résultat(s)`);
     return results;
   } catch (e: any) {
-    console.log(`[discovery] SearXNG ${instanceUrl}: erreur - ${e?.message ?? e}`);
+    console.error(`[discovery] Serper erreur: ${e?.message ?? e}`);
     return [];
   }
 }
 
-async function fetchAllSearXNG(query: string): Promise<RawResult[]> {
-  // Tester les instances en parallèle, retourner la première qui répond
-  const promises = SEARXNG_INSTANCES.map((inst) => fetchSearXNG(query, inst));
-  const results = await Promise.allSettled(promises);
-
-  const allResults: RawResult[] = [];
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value.length > 0) {
-      allResults.push(...r.value);
-    }
-  }
-  return allResults;
-}
-
-// ─── Brave Search API (si clé configurée) ───────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+//  FALLBACKS : Brave, Google CSE, DDG, Bing
+// ════════════════════════════════════════════════════════════════════════════
 
 async function fetchBraveSearch(query: string): Promise<RawResult[]> {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
@@ -196,16 +188,13 @@ async function fetchBraveSearch(query: string): Promise<RawResult[]> {
     });
     if (!res.ok) return [];
     const data = await res.json();
-    const results: RawResult[] = [];
-    for (const item of data.web?.results ?? []) {
-      if (item.url) results.push({ url: item.url, title: item.title ?? "", snippet: item.description ?? "", source: "Brave" });
-    }
+    const results: RawResult[] = (data.web?.results ?? [])
+      .filter((item: any) => item.url)
+      .map((item: any) => ({ url: item.url, title: item.title ?? "", snippet: item.description ?? "", source: "Brave" }));
     console.log(`[discovery] Brave: ${results.length} résultat(s)`);
     return results;
   } catch { return []; }
 }
-
-// ─── Google Custom Search API ───────────────────────────────────────────────
 
 async function fetchGoogleCSE(query: string): Promise<RawResult[]> {
   const key = process.env.GOOGLE_CSE_KEY;
@@ -216,11 +205,9 @@ async function fetchGoogleCSE(query: string): Promise<RawResult[]> {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.items ?? []).map((item: any) => ({ url: item.link ?? "", title: item.title ?? "", snippet: item.snippet ?? "", source: "Google" }));
+    return (data.items ?? []).map((item: any) => ({ url: item.link ?? "", title: item.title ?? "", snippet: item.snippet ?? "", source: "Google CSE" }));
   } catch { return []; }
 }
-
-// ─── DuckDuckGo HTML lite (fallback) ────────────────────────────────────────
 
 async function fetchDDGHtml(query: string): Promise<RawResult[]> {
   try {
@@ -229,10 +216,10 @@ async function fetchDDGHtml(query: string): Promise<RawResult[]> {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.5",
+        "Accept": "text/html",
+        "Accept-Language": "fr-FR,fr;q=0.9",
       },
-      body: `q=${encodeURIComponent(query)}&kl=fr-fr&df=`,
+      body: `q=${encodeURIComponent(query)}&kl=fr-fr`,
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) return [];
@@ -250,19 +237,17 @@ async function fetchDDGHtml(query: string): Promise<RawResult[]> {
       const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
       results.push({ url, title, snippet, source: "DuckDuckGo" });
     }
-    console.log(`[discovery] DDG: ${results.length} résultat(s)`);
+    if (results.length > 0) console.log(`[discovery] DDG: ${results.length} résultat(s)`);
     return results;
   } catch { return []; }
 }
-
-// ─── Bing HTML (fallback) ──────────────────────────────────────────────────
 
 async function fetchBingHtml(query: string): Promise<RawResult[]> {
   try {
     const res = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=fr&cc=FR&count=20`, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "text/html",
         "Accept-Language": "fr-FR,fr;q=0.9",
       },
       signal: AbortSignal.timeout(10000),
@@ -275,18 +260,22 @@ async function fetchBingHtml(query: string): Promise<RawResult[]> {
       const block = liBlocks[i];
       const hrefMatch = block.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
       if (!hrefMatch) continue;
-      const url = hrefMatch[1];
-      const title = hrefMatch[2].replace(/<[^>]+>/g, "").trim();
       const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
-      const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-      results.push({ url, title, snippet, source: "Bing" });
+      results.push({
+        url: hrefMatch[1],
+        title: hrefMatch[2].replace(/<[^>]+>/g, "").trim(),
+        snippet: snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "",
+        source: "Bing",
+      });
     }
-    console.log(`[discovery] Bing: ${results.length} résultat(s)`);
+    if (results.length > 0) console.log(`[discovery] Bing: ${results.length} résultat(s)`);
     return results;
   } catch { return []; }
 }
 
-// ─── Fonction principale ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+//  FONCTION PRINCIPALE
+// ════════════════════════════════════════════════════════════════════════════
 
 export async function discoverCompetitors(params: {
   query: string;
@@ -300,21 +289,25 @@ export async function discoverCompetitors(params: {
   console.log(`[discovery] ======= Recherche: "${query}" (limit=${limit}) =======`);
 
   const q1 = `${query} boutique en ligne acheter`;
-  const q2 = `${query} shop online buy`;
+  const q2 = `${query} shop online buy price`;
 
-  // SearXNG = source primaire (pas de clé API, fonctionne depuis serveurs)
-  // + Brave/Google si clés dispo + DDG/Bing en fallback
-  const [searx1, searx2, brave, google, ddg, bing] = await Promise.all([
-    fetchAllSearXNG(q1),
-    fetchAllSearXNG(q2),
+  // Serper = source primaire (API Google fiable)
+  // Tout le reste en fallback
+  const [serper1, serper2, brave, google, ddg, bing] = await Promise.all([
+    fetchSerper(q1),
+    fetchSerper(q2),
     fetchBraveSearch(q1),
     fetchGoogleCSE(query),
     fetchDDGHtml(q1),
     fetchBingHtml(q1),
   ]);
 
-  const allItems = [...searx1, ...searx2, ...brave, ...google, ...ddg, ...bing];
-  console.log(`[discovery] Total brut: ${allItems.length} (SearXNG: ${searx1.length + searx2.length}, Brave: ${brave.length}, Google: ${google.length}, DDG: ${ddg.length}, Bing: ${bing.length})`);
+  const allItems = [...serper1, ...serper2, ...brave, ...google, ...ddg, ...bing];
+  console.log(`[discovery] Total brut: ${allItems.length} (Serper: ${serper1.length + serper2.length}, Brave: ${brave.length}, Google CSE: ${google.length}, DDG: ${ddg.length}, Bing: ${bing.length})`);
+
+  if (allItems.length === 0) {
+    console.log("[discovery] AUCUNE source n'a retourné de résultats. Vérifiez SERPER_API_KEY dans les variables Railway.");
+  }
 
   const seedTokens = tokenize(query);
   const seenDomains = new Set<string>();
@@ -357,7 +350,7 @@ export async function discoverCompetitors(params: {
 
   const top = rawCandidates.slice(0, limit);
 
-  // Détection de plateforme en batch de 8
+  // Détection plateforme en batch
   const withPlatform: CompetitorCandidate[] = [];
   for (let i = 0; i < top.length; i += 8) {
     const batch = top.slice(i, i + 8);
