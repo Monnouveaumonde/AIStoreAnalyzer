@@ -54,6 +54,7 @@ const EXCLUDED_DOMAINS = [
   "apple.com", "microsoft.com", "github.com",
   "w3.org", "stackoverflow.com", "medium.com",
   "about.com", "healthline.com", "nytimes.com",
+  "searx.", "search.",
 ];
 
 function isDomainExcluded(domain: string, ownDomain?: string): boolean {
@@ -78,14 +79,14 @@ async function detectPlatformFromUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;
-    const html = (await res.text()).slice(0, 30000);
+    const html = (await res.text()).slice(0, 25000);
     if (html.includes("cdn.shopify.com") || html.includes("Shopify.theme") || html.includes("myshopify")) return "Shopify";
     if (html.includes("woocommerce") || html.includes("wc-ajax") || html.includes("wp-content/plugins/woocommerce")) return "WooCommerce";
     if (html.includes("prestashop") || html.includes("PrestaShop")) return "PrestaShop";
@@ -121,12 +122,109 @@ function scoreDomainStore(domain: string): number {
   return keywords.some((k) => d.includes(k)) ? 0.15 : 0;
 }
 
-// ─── DuckDuckGo HTML lite (vrai moteur web, pas l'API encyclopédique) ─────────
+type RawResult = { url: string; title: string; snippet: string; source: string };
 
-async function fetchDDGHtml(query: string, source: string): Promise<Array<{ url: string; title: string; snippet: string; source: string }>> {
+// ─── SearXNG (instances publiques, API JSON, pas de clé requise) ────────────
+
+const SEARXNG_INSTANCES = [
+  "https://search.bus-hit.me",
+  "https://search.sapti.me",
+  "https://searx.tiekoetter.com",
+  "https://search.neet.works",
+  "https://searx.be",
+  "https://paulgo.io",
+];
+
+async function fetchSearXNG(query: string, instanceUrl: string): Promise<RawResult[]> {
   try {
-    const searchUrl = `https://html.duckduckgo.com/html/`;
-    const res = await fetch(searchUrl, {
+    const url = `${instanceUrl}/search?q=${encodeURIComponent(query)}&format=json&language=fr&categories=general`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "ShopPulseAI/1.0",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      console.log(`[discovery] SearXNG ${instanceUrl}: HTTP ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    const results: RawResult[] = [];
+    for (const item of data.results ?? []) {
+      if (item.url && item.title) {
+        results.push({
+          url: item.url,
+          title: item.title,
+          snippet: item.content ?? "",
+          source: "SearXNG",
+        });
+      }
+    }
+    console.log(`[discovery] SearXNG ${instanceUrl}: ${results.length} résultat(s)`);
+    return results;
+  } catch (e: any) {
+    console.log(`[discovery] SearXNG ${instanceUrl}: erreur - ${e?.message ?? e}`);
+    return [];
+  }
+}
+
+async function fetchAllSearXNG(query: string): Promise<RawResult[]> {
+  // Tester les instances en parallèle, retourner la première qui répond
+  const promises = SEARXNG_INSTANCES.map((inst) => fetchSearXNG(query, inst));
+  const results = await Promise.allSettled(promises);
+
+  const allResults: RawResult[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value.length > 0) {
+      allResults.push(...r.value);
+    }
+  }
+  return allResults;
+}
+
+// ─── Brave Search API (si clé configurée) ───────────────────────────────────
+
+async function fetchBraveSearch(query: string): Promise<RawResult[]> {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!apiKey) return [];
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=20&search_lang=fr&country=fr`;
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", "X-Subscription-Token": apiKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results: RawResult[] = [];
+    for (const item of data.web?.results ?? []) {
+      if (item.url) results.push({ url: item.url, title: item.title ?? "", snippet: item.description ?? "", source: "Brave" });
+    }
+    console.log(`[discovery] Brave: ${results.length} résultat(s)`);
+    return results;
+  } catch { return []; }
+}
+
+// ─── Google Custom Search API ───────────────────────────────────────────────
+
+async function fetchGoogleCSE(query: string): Promise<RawResult[]> {
+  const key = process.env.GOOGLE_CSE_KEY;
+  const cx = process.env.GOOGLE_CSE_CX;
+  if (!key || !cx) return [];
+  try {
+    const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(query)}&num=10&lr=lang_fr`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.items ?? []).map((item: any) => ({ url: item.link ?? "", title: item.title ?? "", snippet: item.snippet ?? "", source: "Google" }));
+  } catch { return []; }
+}
+
+// ─── DuckDuckGo HTML lite (fallback) ────────────────────────────────────────
+
+async function fetchDDGHtml(query: string): Promise<RawResult[]> {
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -139,64 +237,29 @@ async function fetchDDGHtml(query: string, source: string): Promise<Array<{ url:
     });
     if (!res.ok) return [];
     const html = await res.text();
-
-    const results: Array<{ url: string; title: string; snippet: string; source: string }> = [];
-
-    // Extraire les <a class="result__a"> ... </a>
-    const resultBlocks = html.split(/class="result\s/g);
-    for (const block of resultBlocks) {
+    const results: RawResult[] = [];
+    const blocks = html.split(/class="result\s/g);
+    for (const block of blocks) {
       const hrefMatch = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
       if (!hrefMatch) continue;
       let url = hrefMatch[1];
       const title = hrefMatch[2].replace(/<[^>]+>/g, "").trim();
-
-      // DDG lite wraps URLs with a redirect
-      if (url.includes("uddg=")) {
-        try {
-          url = decodeURIComponent(url.split("uddg=")[1].split("&")[0]);
-        } catch { /* keep original */ }
-      }
+      if (url.includes("uddg=")) { try { url = decodeURIComponent(url.split("uddg=")[1].split("&")[0]); } catch {} }
       if (!url.startsWith("http")) continue;
-
       const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|td|span)/i);
       const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-
-      results.push({ url, title, snippet, source });
+      results.push({ url, title, snippet, source: "DuckDuckGo" });
     }
+    console.log(`[discovery] DDG: ${results.length} résultat(s)`);
     return results;
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-// ─── Google Custom Search API (si clés disponibles) ──────────────────────────
+// ─── Bing HTML (fallback) ──────────────────────────────────────────────────
 
-async function fetchGoogleCSE(query: string): Promise<Array<{ url: string; title: string; snippet: string; source: string }>> {
-  const key = process.env.GOOGLE_CSE_KEY;
-  const cx = process.env.GOOGLE_CSE_CX;
-  if (!key || !cx) return [];
+async function fetchBingHtml(query: string): Promise<RawResult[]> {
   try {
-    const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(query)}&num=10&lr=lang_fr`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.items ?? []).map((item: any) => ({
-      url: item.link ?? "",
-      title: item.title ?? "",
-      snippet: item.snippet ?? "",
-      source: "Google",
-    }));
-  } catch {
-    return [];
-  }
-}
-
-// ─── Bing Web Search (scraping HTML) ────────────────────────────────────────
-
-async function fetchBingHtml(query: string): Promise<Array<{ url: string; title: string; snippet: string; source: string }>> {
-  try {
-    const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=fr&cc=FR&count=15`;
-    const res = await fetch(searchUrl, {
+    const res = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=fr&cc=FR&count=20`, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
@@ -206,8 +269,7 @@ async function fetchBingHtml(query: string): Promise<Array<{ url: string; title:
     });
     if (!res.ok) return [];
     const html = await res.text();
-    const results: Array<{ url: string; title: string; snippet: string; source: string }> = [];
-
+    const results: RawResult[] = [];
     const liBlocks = html.split(/<li class="b_algo"/g);
     for (let i = 1; i < liBlocks.length; i++) {
       const block = liBlocks[i];
@@ -215,17 +277,16 @@ async function fetchBingHtml(query: string): Promise<Array<{ url: string; title:
       if (!hrefMatch) continue;
       const url = hrefMatch[1];
       const title = hrefMatch[2].replace(/<[^>]+>/g, "").trim();
-      const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i) || block.match(/class="b_caption"[^>]*>[\s\S]*?<p>([\s\S]*?)<\/p>/i);
+      const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
       const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
       results.push({ url, title, snippet, source: "Bing" });
     }
+    console.log(`[discovery] Bing: ${results.length} résultat(s)`);
     return results;
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-// ─── Fonction principale ─────────────────────────────────────────────────────
+// ─── Fonction principale ────────────────────────────────────────────────────
 
 export async function discoverCompetitors(params: {
   query: string;
@@ -236,36 +297,31 @@ export async function discoverCompetitors(params: {
   const query = (params.query || "").trim();
   if (!query) return [];
 
-  // Construire 4 requêtes ciblées en parallèle pour maximiser les résultats
-  const queries = [
-    { q: `${query} boutique en ligne acheter`, src: "DuckDuckGo" },
-    { q: `${query} site shopify acheter prix`, src: "DuckDuckGo-Shopify" },
-    { q: `${query} acheter en ligne prix livraison`, src: "Bing" },
-    { q: `${query} shop online buy price`, src: "Bing-EN" },
-  ];
+  console.log(`[discovery] ======= Recherche: "${query}" (limit=${limit}) =======`);
 
-  const [ddg1, ddg2, bing1, bing2, google] = await Promise.all([
-    fetchDDGHtml(queries[0].q, queries[0].src),
-    fetchDDGHtml(queries[1].q, queries[1].src),
-    fetchBingHtml(queries[2].q),
-    fetchBingHtml(queries[3].q),
+  const q1 = `${query} boutique en ligne acheter`;
+  const q2 = `${query} shop online buy`;
+
+  // SearXNG = source primaire (pas de clé API, fonctionne depuis serveurs)
+  // + Brave/Google si clés dispo + DDG/Bing en fallback
+  const [searx1, searx2, brave, google, ddg, bing] = await Promise.all([
+    fetchAllSearXNG(q1),
+    fetchAllSearXNG(q2),
+    fetchBraveSearch(q1),
     fetchGoogleCSE(query),
+    fetchDDGHtml(q1),
+    fetchBingHtml(q1),
   ]);
 
-  const allItems = [...ddg1, ...ddg2, ...bing1, ...bing2, ...google];
+  const allItems = [...searx1, ...searx2, ...brave, ...google, ...ddg, ...bing];
+  console.log(`[discovery] Total brut: ${allItems.length} (SearXNG: ${searx1.length + searx2.length}, Brave: ${brave.length}, Google: ${google.length}, DDG: ${ddg.length}, Bing: ${bing.length})`);
 
   const seedTokens = tokenize(query);
   const seenDomains = new Set<string>();
   const rawCandidates: Array<{
-    url: string;
-    domain: string;
-    title: string;
-    snippet: string;
-    source: string;
-    relevanceScore: number;
-    ecommerceScore: number;
-    platform: string | null;
-    score: number;
+    url: string; domain: string; title: string; snippet: string;
+    source: string; relevanceScore: number; ecommerceScore: number;
+    platform: string | null; score: number;
   }> = [];
 
   for (const item of allItems) {
@@ -282,77 +338,60 @@ export async function discoverCompetitors(params: {
     const domainBonus = scoreDomainStore(domain);
     const platform = detectPlatform(textForScoring, item.url);
     const platformBonus = platform ? 0.2 : 0;
-
     const score = Math.min(1, relevanceScore * 0.45 + ecommerceScore * 0.3 + domainBonus + platformBonus);
 
     rawCandidates.push({
-      url: item.url,
-      domain,
-      title: item.title || domain,
-      snippet: item.snippet,
-      source: item.source,
-      relevanceScore,
-      ecommerceScore,
-      platform,
-      score,
+      url: item.url, domain, title: item.title || domain,
+      snippet: item.snippet, source: item.source,
+      relevanceScore, ecommerceScore, platform, score,
     });
   }
 
-  // Trier et limiter avant la détection de plateforme (coûteuse)
+  console.log(`[discovery] Après filtrage: ${rawCandidates.length} candidats uniques`);
+
   rawCandidates.sort((a, b) => {
-    const aS = a.platform === "Shopify" ? 1 : 0;
-    const bS = b.platform === "Shopify" ? 1 : 0;
-    if (aS !== bS) return bS - aS;
+    if (a.platform === "Shopify" && b.platform !== "Shopify") return -1;
+    if (b.platform === "Shopify" && a.platform !== "Shopify") return 1;
     return b.score - a.score;
   });
 
   const top = rawCandidates.slice(0, limit);
 
-  // Détection de plateforme en parallèle pour les candidats sans plateforme
-  const withPlatform = await Promise.all(
-    top.map(async (c) => {
-      let platform = c.platform;
-      if (!platform) {
-        try {
-          platform = await detectPlatformFromUrl(c.url);
-        } catch {
-          platform = null;
+  // Détection de plateforme en batch de 8
+  const withPlatform: CompetitorCandidate[] = [];
+  for (let i = 0; i < top.length; i += 8) {
+    const batch = top.slice(i, i + 8);
+    const resolved = await Promise.all(
+      batch.map(async (c) => {
+        let platform = c.platform;
+        if (!platform) {
+          try { platform = await detectPlatformFromUrl(c.url); } catch { platform = null; }
         }
-      }
+        const platformBonus = platform ? 0.2 : 0;
+        const finalScore = Math.min(1, c.relevanceScore * 0.45 + c.ecommerceScore * 0.3 + scoreDomainStore(c.domain) + platformBonus);
+        const confidence: CompetitorCandidate["confidence"] =
+          finalScore >= 0.35 ? "elevee" : finalScore >= 0.15 ? "moyenne" : "faible";
+        const reasonParts: string[] = [];
+        if (platform) reasonParts.push(platform);
+        if (c.relevanceScore >= 0.15) reasonParts.push("niche similaire");
+        if (c.ecommerceScore >= 0.2) reasonParts.push("boutique e-commerce");
+        if (reasonParts.length === 0) reasonParts.push("résultat web");
+        return {
+          url: c.url, domain: c.domain, title: c.title, snippet: c.snippet,
+          score: finalScore, relevanceScore: c.relevanceScore, ecommerceScore: c.ecommerceScore,
+          platform, source: c.source, confidence, reason: reasonParts.join(" · "),
+        } satisfies CompetitorCandidate;
+      }),
+    );
+    withPlatform.push(...resolved);
+  }
 
-      const platformBonus = platform ? 0.2 : 0;
-      const finalScore = Math.min(1, c.relevanceScore * 0.45 + c.ecommerceScore * 0.3 + scoreDomainStore(c.domain) + platformBonus);
-
-      const confidence: CompetitorCandidate["confidence"] =
-        finalScore >= 0.35 ? "elevee" : finalScore >= 0.15 ? "moyenne" : "faible";
-
-      const reasonParts: string[] = [];
-      if (platform) reasonParts.push(platform);
-      if (c.relevanceScore >= 0.15) reasonParts.push("niche similaire");
-      if (c.ecommerceScore >= 0.2) reasonParts.push("boutique e-commerce");
-      if (reasonParts.length === 0) reasonParts.push("résultat web");
-
-      return {
-        url: c.url,
-        domain: c.domain,
-        title: c.title,
-        snippet: c.snippet,
-        score: finalScore,
-        relevanceScore: c.relevanceScore,
-        ecommerceScore: c.ecommerceScore,
-        platform,
-        source: c.source,
-        confidence,
-        reason: reasonParts.join(" · "),
-      } satisfies CompetitorCandidate;
-    }),
-  );
-
-  // Re-trier après détection plateforme
-  return withPlatform.sort((a, b) => {
-    const aS = a.platform === "Shopify" ? 1 : 0;
-    const bS = b.platform === "Shopify" ? 1 : 0;
-    if (aS !== bS) return bS - aS;
+  withPlatform.sort((a, b) => {
+    if (a.platform === "Shopify" && b.platform !== "Shopify") return -1;
+    if (b.platform === "Shopify" && a.platform !== "Shopify") return 1;
     return b.score - a.score;
   });
+
+  console.log(`[discovery] ======= Résultat: ${withPlatform.length} concurrent(s) =======`);
+  return withPlatform;
 }
