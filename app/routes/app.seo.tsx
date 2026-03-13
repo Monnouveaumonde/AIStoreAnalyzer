@@ -11,7 +11,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigate, useSubmit, useNavigation, useActionData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -32,7 +32,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runSeoScan } from "../services/seo/seo-scanner.server";
 import { batchGenerateSuggestions } from "../services/seo/seo-ai.server";
-import { getSeoScanDashboard } from "../services/seo/seo-optimizer.server";
+import { getSeoScanDashboard, applyOptimization } from "../services/seo/seo-optimizer.server";
 import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -53,6 +53,76 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   const formData = await request.formData();
   const intent = formData.get("intent");
+
+  if (intent === "auto_fix_all") {
+    const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    if (!shop) return json({ error: "Boutique introuvable" }, { status: 404 });
+
+    const latestScan = await prisma.seoScan.findFirst({
+      where: { shopId: shop.id },
+      orderBy: { createdAt: "desc" },
+      include: { seoIssues: { where: { isFixed: false } } },
+    });
+
+    if (!latestScan || latestScan.seoIssues.length === 0) {
+      return json({ autoFixResult: { fixed: 0, failed: 0, message: "Aucune issue à corriger." } });
+    }
+
+    const autoFixableTypes = [
+      "MISSING_META_TITLE", "META_TITLE_TOO_SHORT", "META_TITLE_TOO_LONG",
+      "MISSING_META_DESCRIPTION", "META_DESCRIPTION_TOO_SHORT", "META_DESCRIPTION_TOO_LONG",
+      "MISSING_ALT_TEXT",
+    ];
+
+    const fixableIssues = latestScan.seoIssues.filter(
+      (i) => autoFixableTypes.includes(i.issueType) && i.suggestedValue
+    );
+
+    if (fixableIssues.length === 0) {
+      return json({ autoFixResult: { fixed: 0, failed: 0, message: "Aucune issue avec suggestion IA à appliquer. Lancez d'abord un scan SEO." } });
+    }
+
+    let fixed = 0;
+    let failed = 0;
+
+    for (const issue of fixableIssues) {
+      const fieldName =
+        issue.issueType.includes("META_TITLE") ? "metaTitle"
+        : issue.issueType.includes("META_DESCRIPTION") ? "metaDescription"
+        : issue.issueType === "MISSING_ALT_TEXT" ? "altText"
+        : null;
+
+      if (!fieldName || !issue.suggestedValue) { failed++; continue; }
+
+      try {
+        const result = await applyOptimization(admin, {
+          seoScanId: latestScan.id,
+          shopId: shop.id,
+          issueId: issue.id,
+          issueType: issue.issueType,
+          resourceType: issue.resourceType,
+          resourceId: issue.resourceId,
+          resourceTitle: issue.resourceTitle,
+          fieldName,
+          oldValue: issue.currentValue,
+          newValue: issue.suggestedValue,
+        });
+        if (result.success) fixed++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+
+    return json({
+      autoFixResult: {
+        fixed,
+        failed,
+        total: fixableIssues.length,
+        message: `${fixed} correction(s) appliquée(s) sur Shopify${failed > 0 ? `, ${failed} échec(s)` : ""}.`,
+      },
+    });
+  }
 
   if (intent === "run_scan") {
     const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
@@ -167,12 +237,13 @@ function SeverityBadge({ severity }: { severity: string }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function SeoDashboard() {
   const { latestScan, totalOptimizations, plan } = useLoaderData<typeof loader>();
+  const actionData = useActionData<any>();
   const navigate = useNavigate();
   const submit = useSubmit();
   const navigation = useNavigation();
-  const isScanning = navigation.state === "submitting";
-
-  const safeNavigate = (path: string) => navigate(path);
+  const submittingIntent = navigation.formData?.get("intent") as string | null;
+  const isScanning = navigation.state === "submitting" && submittingIntent === "run_scan";
+  const isAutoFixing = navigation.state === "submitting" && submittingIntent === "auto_fix_all";
 
   const scoreColor = latestScan
     ? latestScan.overallScore >= 70
@@ -325,7 +396,7 @@ export default function SeoDashboard() {
                       <Text variant="headingMd" as="h3">
                         Issues prioritaires ({latestScan.seoIssues.filter((i: any) => !i.isFixed).length})
                       </Text>
-                      <Button onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}>
+                      <Button url={`/app/seo/${latestScan.id}`}>
                         Tout voir
                       </Button>
                     </InlineStack>
@@ -370,7 +441,7 @@ export default function SeoDashboard() {
                     {latestScan.seoIssues.filter((i: any) => !i.isFixed).length > 8 && (
                       <Button
                         variant="plain"
-                        onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}
+                        url={`/app/seo/${latestScan.id}`}
                       >
                         Voir les {latestScan.seoIssues.filter((i: any) => !i.isFixed).length - 8} autres issues →
                       </Button>
@@ -420,17 +491,20 @@ export default function SeoDashboard() {
                     </InlineStack>
                   ))}
                   <Divider />
+                  {actionData?.autoFixResult && (
+                    <Banner tone={actionData.autoFixResult.failed > 0 ? "warning" : "success"}>
+                      <Text as="p">{actionData.autoFixResult.message}</Text>
+                    </Banner>
+                  )}
                   <Button
                     variant="primary"
-                    onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}
+                    loading={isAutoFixing}
+                    onClick={() => submit({ intent: "auto_fix_all" }, { method: "post" })}
                   >
-                    Corriger automatiquement
+                    {isAutoFixing ? "Correction en cours..." : "Corriger automatiquement"}
                   </Button>
-                  <Button
-                    variant="plain"
-                    url={`/app/seo/${latestScan.id}`}
-                  >
-                    Ouvrir le rapport (lien direct)
+                  <Button url={`/app/seo/${latestScan.id}`}>
+                    Ouvrir le rapport complet
                   </Button>
                 </BlockStack>
               </Card>

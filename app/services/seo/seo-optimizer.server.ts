@@ -98,26 +98,29 @@ async function applySeoMutation(
   let mutation: string;
   let variables: Record<string, unknown>;
 
+  const seoInput: Record<string, string> = {};
+  if (seo.metaTitle !== undefined) seoInput.title = seo.metaTitle;
+  if (seo.metaDescription !== undefined) seoInput.description = seo.metaDescription;
+
   if (resourceType === "product") {
     mutation = `
-      mutation UpdateProductSeo($id: ID!, $input: ProductInput!) {
-        productUpdate(input: { id: $id, seo: $input }) {
+      mutation UpdateProductSeo($input: ProductInput!) {
+        productUpdate(input: $input) {
           product { id seo { title description } }
           userErrors { field message }
         }
       }
     `;
     variables = {
-      id: resourceId,
       input: {
-        title: seo.metaTitle,
-        description: seo.metaDescription,
+        id: resourceId,
+        seo: seoInput,
       },
     };
   } else if (resourceType === "page") {
     mutation = `
-      mutation UpdatePageSeo($id: ID!, $seo: SEOInput!) {
-        pageUpdate(id: $id, page: { seo: $seo }) {
+      mutation UpdatePageSeo($id: ID!, $page: PageUpdateInput!) {
+        pageUpdate(id: $id, page: $page) {
           page { id seo { title description } }
           userErrors { field message }
         }
@@ -125,9 +128,8 @@ async function applySeoMutation(
     `;
     variables = {
       id: resourceId,
-      seo: {
-        title: seo.metaTitle,
-        description: seo.metaDescription,
+      page: {
+        seo: seoInput,
       },
     };
   } else if (resourceType === "collection") {
@@ -142,20 +144,18 @@ async function applySeoMutation(
     variables = {
       input: {
         id: resourceId,
-        seo: {
-          title: seo.metaTitle,
-          description: seo.metaDescription,
-        },
+        seo: seoInput,
       },
     };
   } else {
+    console.log(`[seo-optimizer] Type de ressource non supporté: ${resourceType}`);
     return false;
   }
 
+  console.log(`[seo-optimizer] Mutation ${resourceType} pour ${resourceId}`, JSON.stringify(seoInput));
   const response = await admin.graphql(mutation, { variables });
   const data = await response.json();
 
-  // Vérifie les userErrors retournés par Shopify
   const mutationName = resourceType === "product"
     ? "productUpdate"
     : resourceType === "page"
@@ -164,11 +164,13 @@ async function applySeoMutation(
 
   const result = data.data?.[mutationName];
   if (result?.userErrors?.length > 0) {
-    console.error("SEO mutation errors:", result.userErrors);
+    console.error(`[seo-optimizer] Mutation errors pour ${resourceId}:`, result.userErrors);
     return false;
   }
 
-  return !!result?.[resourceType];
+  const success = !!result?.[resourceType];
+  console.log(`[seo-optimizer] Mutation ${resourceType}: ${success ? "OK" : "ECHEC"}`);
+  return success;
 }
 
 /**
