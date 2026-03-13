@@ -207,6 +207,11 @@ export async function batchGenerateSuggestions(
 async function callAI(prompt: string, maxTokens: number): Promise<string> {
   const provider = process.env.AI_PROVIDER ?? "openai";
 
+  if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+    console.log("[seo-ai] Aucune clé API IA configurée (OPENAI_API_KEY / ANTHROPIC_API_KEY). Utilisation du fallback.");
+    throw new Error("Pas de clé API IA");
+  }
+
   if (provider === "anthropic" && process.env.ANTHROPIC_API_KEY) {
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

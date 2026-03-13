@@ -75,15 +75,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     ];
 
     const fixableIssues = latestScan.seoIssues.filter(
-      (i) => autoFixableTypes.includes(i.issueType) && i.suggestedValue
+      (i) => autoFixableTypes.includes(i.issueType)
     );
 
     if (fixableIssues.length === 0) {
-      return json({ autoFixResult: { fixed: 0, failed: 0, message: "Aucune issue avec suggestion IA à appliquer. Lancez d'abord un scan SEO." } });
+      return json({ autoFixResult: { fixed: 0, failed: 0, message: "Aucune issue corrigeable automatiquement détectée." } });
+    }
+
+    // Générer les suggestions manquantes à la volée
+    const issuesNeedingSuggestion = fixableIssues.filter((i) => !i.suggestedValue);
+    if (issuesNeedingSuggestion.length > 0) {
+      console.log(`[auto-fix] Génération de ${issuesNeedingSuggestion.length} suggestion(s) manquante(s)...`);
+      const shopName = shop.shopName ?? session.shop;
+      const suggestions = await batchGenerateSuggestions(
+        issuesNeedingSuggestion.map((i) => ({
+          id: i.id,
+          issueType: i.issueType,
+          resourceTitle: i.resourceTitle,
+          resourceType: i.resourceType,
+          currentValue: i.currentValue,
+        })),
+        shopName,
+      );
+
+      // Sauvegarder les suggestions en base et les appliquer aux issues en mémoire
+      for (const [issueId, value] of suggestions) {
+        const issue = fixableIssues.find((i) => i.id === issueId);
+        if (issue) (issue as any).suggestedValue = value;
+        await prisma.seoIssue.update({
+          where: { id: issueId },
+          data: { suggestedValue: value, aiGenerated: true },
+        }).catch(() => {});
+      }
+      console.log(`[auto-fix] ${suggestions.size} suggestion(s) générée(s)`);
     }
 
     let fixed = 0;
     let failed = 0;
+    let skipped = 0;
 
     for (const issue of fixableIssues) {
       const fieldName =
@@ -92,7 +121,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : issue.issueType === "MISSING_ALT_TEXT" ? "altText"
         : null;
 
-      if (!fieldName || !issue.suggestedValue) { failed++; continue; }
+      if (!fieldName || !issue.suggestedValue) { skipped++; continue; }
 
       try {
         const result = await applyOptimization(admin, {
@@ -114,12 +143,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
+    const parts = [`${fixed} correction(s) appliquée(s) sur Shopify`];
+    if (failed > 0) parts.push(`${failed} échec(s)`);
+    if (skipped > 0) parts.push(`${skipped} sans suggestion`);
+
     return json({
       autoFixResult: {
         fixed,
         failed,
+        skipped,
         total: fixableIssues.length,
-        message: `${fixed} correction(s) appliquée(s) sur Shopify${failed > 0 ? `, ${failed} échec(s)` : ""}.`,
+        message: parts.join(", ") + ".",
       },
     });
   }
@@ -161,10 +195,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       include: { seoIssues: true },
     });
 
-    // Génération asynchrone des suggestions IA pour les issues sans suggestion
+    const aiFixableTypes = [
+      "MISSING_META_TITLE", "META_TITLE_TOO_SHORT", "META_TITLE_TOO_LONG",
+      "MISSING_META_DESCRIPTION", "META_DESCRIPTION_TOO_SHORT", "META_DESCRIPTION_TOO_LONG",
+      "MISSING_ALT_TEXT",
+    ];
     const issuesNeedingAI = scan.seoIssues
-      .filter((i) => !i.suggestedValue && ["MISSING_META_TITLE", "MISSING_META_DESCRIPTION", "MISSING_ALT_TEXT"].includes(i.issueType))
-      .slice(0, 20); // Limite à 20 pour le coût IA
+      .filter((i) => !i.suggestedValue && aiFixableTypes.includes(i.issueType))
+      .slice(0, 30);
 
     if (issuesNeedingAI.length > 0) {
       try {
