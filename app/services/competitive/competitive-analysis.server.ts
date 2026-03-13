@@ -1,4 +1,4 @@
-import { scrapeProductPrice } from "./price-scraper.server";
+import { scrapeProductPrice, fetchHtmlOnce } from "./price-scraper.server";
 
 type OwnProductSignals = {
   title?: string | null;
@@ -63,30 +63,12 @@ function parseLikelyPrice(raw: string): number | null {
   return value >= 1000 ? value / 100 : value;
 }
 
-async function fetchPageHtml(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; CompetitiveInsightsBot/1.0; +https://ai-store-analyzer.com/bot)",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(9000),
-    });
-    if (!response.ok) return null;
-    return await response.text();
-  } catch {
-    return null;
-  }
-}
-
 export async function analyzeCompetitivePage(input: {
   competitorUrl: string;
   own?: OwnProductSignals;
 }): Promise<CompetitiveAnalysis> {
-  const scraped = await scrapeProductPrice(input.competitorUrl);
-  const html = await fetchPageHtml(input.competitorUrl);
+  const html = await fetchHtmlOnce(input.competitorUrl);
+  const scraped = await scrapeProductPrice(input.competitorUrl, html);
 
   const normalizedHtml = (html ?? "").replace(/&nbsp;|&#160;/gi, " ");
   const plain = stripTags(normalizedHtml).toLowerCase();

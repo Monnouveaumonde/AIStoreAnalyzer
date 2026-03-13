@@ -54,7 +54,51 @@ function parseLocalizedPrice(raw: string): number | null {
  *  2. Meta tags OG / Shopify product meta
  *  3. Patterns de texte courants (fallback)
  */
-export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
+const BROWSER_USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+];
+
+function randomUA(): string {
+  return BROWSER_USER_AGENTS[Math.floor(Math.random() * BROWSER_USER_AGENTS.length)];
+}
+
+function buildHeaders(url: string): Record<string, string> {
+  let referer = "https://www.google.com/";
+  try { referer = new URL(url).origin + "/"; } catch {}
+  return {
+    "User-Agent": randomUA(),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": referer,
+    "DNT": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
+  };
+}
+
+export async function fetchHtmlOnce(url: string, timeoutMs = 12000): Promise<string | null> {
+  try {
+    const resp = await fetch(url, {
+      headers: buildHeaders(url),
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
+    return null;
+  }
+}
+
+export async function scrapeProductPrice(url: string, preloadedHtml?: string | null): Promise<ScrapedProduct> {
   const result: ScrapedProduct = {
     price: null,
     currency: "EUR",
@@ -67,23 +111,12 @@ export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
   };
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        // User-agent neutre pour ne pas être bloqué
-        "User-Agent":
-          "Mozilla/5.0 (compatible; PriceBot/1.0; +https://ai-store-analyzer.com/bot)",
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(8000), // 8 secondes max
-    });
+    const html = preloadedHtml ?? await fetchHtmlOnce(url);
 
-    if (!response.ok) {
-      result.error = `HTTP ${response.status}`;
+    if (!html) {
+      result.error = "Impossible de charger la page (timeout ou blocage)";
       return result;
     }
-
-    const html = await response.text();
     const htmlNormalized = html.replace(/&nbsp;|&#160;/gi, " ");
 
     // ── Couche 1 : JSON-LD schema.org ──────────────────────────────────────
