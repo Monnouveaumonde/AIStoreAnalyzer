@@ -33,15 +33,24 @@ import prisma from "../db.server";
 import { runSeoScan } from "../services/seo/seo-scanner.server";
 import { batchGenerateSuggestions } from "../services/seo/seo-ai.server";
 import { getSeoScanDashboard } from "../services/seo/seo-optimizer.server";
+import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    throw redirect("/app/billing?source=seo");
+  }
   const data = await getSeoScanDashboard(session.shop);
   return json(data ?? { latestScan: null, totalOptimizations: 0, plan: "FREE" });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    return redirect("/app/billing?source=seo");
+  }
   const formData = await request.formData();
   const intent = formData.get("intent");
 
@@ -162,6 +171,8 @@ export default function SeoDashboard() {
   const submit = useSubmit();
   const navigation = useNavigation();
   const isScanning = navigation.state === "submitting";
+
+  const safeNavigate = (path: string) => navigate(path);
 
   const scoreColor = latestScan
     ? latestScan.overallScore >= 70
@@ -314,7 +325,7 @@ export default function SeoDashboard() {
                       <Text variant="headingMd" as="h3">
                         Issues prioritaires ({latestScan.seoIssues.filter((i: any) => !i.isFixed).length})
                       </Text>
-                      <Button onClick={() => navigate(`/app/seo/${latestScan.id}`)}>
+                      <Button onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}>
                         Tout voir
                       </Button>
                     </InlineStack>
@@ -359,7 +370,7 @@ export default function SeoDashboard() {
                     {latestScan.seoIssues.filter((i: any) => !i.isFixed).length > 8 && (
                       <Button
                         variant="plain"
-                        onClick={() => navigate(`/app/seo/${latestScan.id}`)}
+                        onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}
                       >
                         Voir les {latestScan.seoIssues.filter((i: any) => !i.isFixed).length - 8} autres issues →
                       </Button>
@@ -411,9 +422,15 @@ export default function SeoDashboard() {
                   <Divider />
                   <Button
                     variant="primary"
-                    onClick={() => navigate(`/app/seo/${latestScan.id}`)}
+                    onClick={() => safeNavigate(`/app/seo/${latestScan.id}`)}
                   >
                     Corriger automatiquement
+                  </Button>
+                  <Button
+                    variant="plain"
+                    url={`/app/seo/${latestScan.id}`}
+                  >
+                    Ouvrir le rapport (lien direct)
                   </Button>
                 </BlockStack>
               </Card>

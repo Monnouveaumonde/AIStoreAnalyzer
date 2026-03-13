@@ -6,8 +6,13 @@ declare global {
 }
 
 // Un seul client Prisma partagé — évite les connexions multiples
+const prismaLogLevels =
+  process.env.NODE_ENV === "production"
+    ? ["error", "warn"]
+    : ["query", "error", "warn"];
+
 const prisma = globalThis.__prisma ?? new PrismaClient({
-  log: ["query", "error", "warn"],
+  log: prismaLogLevels,
 });
 
 if (process.env.NODE_ENV !== "production") {

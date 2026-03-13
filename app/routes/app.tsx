@@ -9,7 +9,21 @@ import { authenticate } from "../shopify.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  try {
+    await authenticate.admin(request);
+  } catch (error) {
+    if (error instanceof Response) {
+      const location = error.headers.get("Location");
+      console.info("[auth-debug] /app redirect", {
+        status: error.status,
+        location,
+        url: request.url,
+      });
+    } else {
+      console.error("[auth-debug] /app loader error", error);
+    }
+    throw error;
+  }
   return json({ apiKey: process.env.SHOPIFY_API_KEY || "" });
 };
 

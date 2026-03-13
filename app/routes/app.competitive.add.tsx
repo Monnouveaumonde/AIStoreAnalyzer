@@ -14,7 +14,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -29,16 +29,26 @@ import {
   Spinner,
   Box,
 } from "@shopify/polaris";
-import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { canAddWatchedProduct } from "../services/competitive/watcher.server";
 import { scrapeProductPrice } from "../services/competitive/price-scraper.server";
+import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    throw redirect("/app/billing?source=competitive");
+  }
 
   const check = await canAddWatchedProduct(session.shop);
+  console.info("[competitive.add] loader", {
+    shop: session.shop,
+    canAdd: check.allowed,
+    current: check.current,
+    limit: check.limit,
+  });
 
   // Charge les produits Shopify du marchand pour le sélecteur
   const response = await admin.graphql(`
@@ -67,18 +77,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
+  console.info("[competitive.add] action hit", { shop: session.shop, method: request.method });
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    return redirect("/app/billing?source=competitive");
+  }
   const formData = await request.formData();
 
-  const shopifyProductId = formData.get("shopifyProductId") as string;
-  const shopifyProductTitle = formData.get("shopifyProductTitle") as string;
+  const shopifyProductIdRaw = (formData.get("shopifyProductId") as string | null)?.trim() ?? "";
+  const manualProductTitle = (formData.get("manualProductTitle") as string | null)?.trim() ?? "";
   const myCurrentPrice = parseFloat(formData.get("myCurrentPrice") as string || "0");
   const competitorUrl = (formData.get("competitorUrl") as string || "").trim();
   const competitorName = (formData.get("competitorName") as string || "").trim();
 
+  let shopifyProductId = shopifyProductIdRaw;
+  let shopifyProductTitle = "Produit Shopify";
+
   // Validations de base
-  if (!shopifyProductId || !competitorUrl || !competitorName) {
+  if ((!shopifyProductId && !manualProductTitle) || !competitorUrl || !competitorName) {
     return json({ error: "Tous les champs sont obligatoires." }, { status: 400 });
+  }
+
+  // Fallback: boutique sans produit Shopify sélectionnable
+  if (!shopifyProductId && manualProductTitle) {
+    shopifyProductId = `manual:${Date.now()}`;
+    shopifyProductTitle = manualProductTitle;
   }
 
   let urlObj: URL;
@@ -96,6 +120,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
   if (!shop) return json({ error: "Boutique introuvable." }, { status: 404 });
+
+  if (!shopifyProductId.startsWith("manual:")) {
+    try {
+      const productResp = await admin.graphql(
+        `#graphql
+        query ProductTitle($id: ID!) {
+          product(id: $id) {
+            title
+          }
+        }`,
+        { variables: { id: shopifyProductId } },
+      );
+      const productJson = await productResp.json();
+      const title = productJson?.data?.product?.title;
+      if (typeof title === "string" && title.trim()) {
+        shopifyProductTitle = title.trim();
+      }
+    } catch {
+      // Ne bloque pas la création si Shopify ne renvoie pas le produit.
+    }
+  }
 
   // Premier scraping pour récupérer le prix initial
   let initialPrice: number | null = null;
@@ -142,37 +187,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AddCompetitorPage() {
-  const { canAdd, reason, products } = useLoaderData<typeof loader>();
+  const { canAdd, reason, products, current, limit } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
-  const submit = useSubmit();
-
-  const [selectedProductId, setSelectedProductId] = useState("");
-  const [selectedProductTitle, setSelectedProductTitle] = useState("");
-  const [myPrice, setMyPrice] = useState("");
-  const [competitorUrl, setCompetitorUrl] = useState("");
-  const [competitorName, setCompetitorName] = useState("");
 
   const isSubmitting = navigation.state === "submitting";
-
-  const handleProductSelect = (id: string) => {
-    const product = products.find((p: any) => p.id === id);
-    if (product) {
-      setSelectedProductId(product.id);
-      setSelectedProductTitle(product.title);
-      setMyPrice(product.price > 0 ? product.price.toString() : "");
-    }
-  };
-
-  const handleSubmit = () => {
-    const data = new FormData();
-    data.set("shopifyProductId", selectedProductId);
-    data.set("shopifyProductTitle", selectedProductTitle);
-    data.set("myCurrentPrice", myPrice);
-    data.set("competitorUrl", competitorUrl);
-    data.set("competitorName", competitorName);
-    submit(data, { method: "post" });
-  };
 
   return (
     <Page
@@ -185,7 +204,9 @@ export default function AddCompetitorPage() {
             <BlockStack gap="400">
               {!canAdd && (
                 <Banner tone="warning">
-                  <Text as="p">{reason}</Text>
+                  <Text as="p">
+                    {reason} ({current}/{limit === -1 ? "illimité" : limit})
+                  </Text>
                   <Button url="/app/billing">Upgrader le plan</Button>
                 </Banner>
               )}
@@ -196,81 +217,134 @@ export default function AddCompetitorPage() {
                 </Banner>
               )}
 
+              <form id="competitive-add-form" method="post">
               <FormLayout>
+                <Banner tone="info">
+                  <Text as="p">
+                    Sélectionnez un produit, puis renseignez le concurrent et son URL produit.
+                  </Text>
+                </Banner>
+
                 {/* Sélection du produit du marchand */}
                 <BlockStack gap="200">
                   <Text variant="headingSm" as="h3">Votre produit</Text>
-                  <div style={{ maxHeight: "200px", overflowY: "auto", border: "1px solid #e1e3e5", borderRadius: "8px" }}>
-                    {products.map((p: any) => (
-                      <Box
-                        key={p.id}
-                        padding="200"
-                        background={selectedProductId === p.id ? "bg-surface-selected" : undefined}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleProductSelect(p.id)}
-                          style={{
-                            width: "100%",
-                            textAlign: "left",
-                            background: "none",
-                            border: "none",
-                            cursor: "pointer",
-                            padding: "4px 8px",
-                          }}
-                        >
-                          <InlineStack align="space-between">
-                            <Text variant="bodyMd" as="span">{p.title}</Text>
-                            <Text variant="bodySm" as="span" tone="subdued">{p.price} €</Text>
-                          </InlineStack>
-                        </button>
-                      </Box>
-                    ))}
-                  </div>
-                  {selectedProductTitle && (
-                    <Text variant="bodySm" as="p" tone="success">
-                      ✓ Sélectionné : {selectedProductTitle}
-                    </Text>
+                  {products.length > 0 ? (
+                    <select
+                      name="shopifyProductId"
+                      defaultValue=""
+                      style={{
+                        width: "100%",
+                        minHeight: 40,
+                        border: "1px solid #c9cccf",
+                        borderRadius: 8,
+                        padding: "8px 10px",
+                        background: "#ffffff",
+                      }}
+                    >
+                      <option value="" disabled>
+                        Choisir un produit Shopify...
+                      </option>
+                      {products.map((p: any) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title} {p.price > 0 ? `- ${p.price} EUR` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <label>
+                      <Text as="span" variant="bodyMd">Nom de votre produit</Text>
+                      <input
+                        type="text"
+                        name="manualProductTitle"
+                        placeholder="Ex: T-shirt coton premium"
+                        style={{
+                          width: "100%",
+                          minHeight: 40,
+                          marginTop: 6,
+                          border: "1px solid #c9cccf",
+                          borderRadius: 8,
+                          padding: "8px 10px",
+                        }}
+                      />
+                    </label>
                   )}
                 </BlockStack>
 
-                <TextField
-                  label="Mon prix actuel"
-                  type="number"
-                  value={myPrice}
-                  onChange={setMyPrice}
-                  suffix="€"
-                  helpText="Votre prix de vente actuel pour ce produit"
-                  autoComplete="off"
-                />
+                <label>
+                  <Text as="span" variant="bodyMd">Mon prix actuel</Text>
+                  <input
+                    type="number"
+                    name="myCurrentPrice"
+                    step="0.01"
+                    min="0"
+                    placeholder="29.90"
+                    style={{
+                      width: "100%",
+                      minHeight: 40,
+                      marginTop: 6,
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                  />
+                </label>
 
-                <TextField
-                  label="Nom du concurrent"
-                  value={competitorName}
-                  onChange={setCompetitorName}
-                  placeholder="ex: Amazon, CDiscount, concurrent-shop.fr"
-                  autoComplete="off"
-                />
+                <label>
+                  <Text as="span" variant="bodyMd">Nom du concurrent</Text>
+                  <input
+                    type="text"
+                    name="competitorName"
+                    placeholder="ex: Amazon, CDiscount, concurrent-shop.fr"
+                    style={{
+                      width: "100%",
+                      minHeight: 40,
+                      marginTop: 6,
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                  />
+                </label>
 
-                <TextField
-                  label="URL du produit chez le concurrent"
-                  value={competitorUrl}
-                  onChange={setCompetitorUrl}
-                  type="url"
-                  placeholder="https://www.concurrent.fr/produit/ref-123"
-                  helpText="L'URL exacte de la page produit à surveiller. Le prix sera extrait automatiquement."
-                  autoComplete="off"
-                />
+                <label>
+                  <Text as="span" variant="bodyMd">URL du produit chez le concurrent</Text>
+                  <input
+                    type="url"
+                    name="competitorUrl"
+                    placeholder="https://www.concurrent.fr/produit/ref-123"
+                    style={{
+                      width: "100%",
+                      minHeight: 40,
+                      marginTop: 6,
+                      border: "1px solid #c9cccf",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                  />
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    L'URL exacte de la page produit à surveiller. Le prix sera extrait automatiquement.
+                  </Text>
+                </label>
 
-                <Button
-                  variant="primary"
-                  disabled={!canAdd || !selectedProductId || !competitorUrl || !competitorName || isSubmitting}
-                  onClick={handleSubmit}
-                  loading={isSubmitting}
-                >
-                  {isSubmitting ? "Vérification du prix en cours..." : "Ajouter la surveillance"}
-                </Button>
+                <div>
+                  <input
+                    type="submit"
+                    value={isSubmitting ? "Vérification du prix en cours..." : "Ajouter la surveillance"}
+                    disabled={isSubmitting}
+                    style={{
+                      background: "#111827",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "10px 14px",
+                      fontWeight: 600,
+                      cursor: isSubmitting ? "not-allowed" : "pointer",
+                      opacity: isSubmitting ? 0.6 : 1,
+                    }}
+                  />
+                </div>
               </FormLayout>
+              </form>
             </BlockStack>
           </Card>
         </Layout.Section>

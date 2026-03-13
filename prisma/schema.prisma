@@ -54,6 +54,22 @@ model Shop {
   seoScans        SeoScan[]
   seoOptimizations SeoOptimization[]
 
+  // Centre d'automatisation globale
+  autoCompetitiveEnabled   Boolean  @default(false)
+  autoCompetitiveFrequency String   @default("daily")
+  autoSeoEnabled           Boolean  @default(false)
+  autoSeoFrequency         String   @default("monthly")
+  autoAnalysisEnabled      Boolean  @default(false)
+  autoAnalysisFrequency    String   @default("monthly")
+  autoAlertsEnabled        Boolean  @default(true)
+  autoAlertThresholdPct    Float    @default(5)
+  autoThemeWatchEnabled    Boolean  @default(false)
+  autoThemeWatchFrequency  String   @default("weekly")
+  autoProductDropEnabled   Boolean  @default(false)
+  autoProductDropFrequency String   @default("daily")
+  autoSeoFixEnabled        Boolean  @default(false)
+  autoSeoFixFrequency      String   @default("weekly")
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -146,6 +162,11 @@ model Subscription {
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
 
+  // Addon Automation+ (optionnel +5€)
+  automationAddonActive   Boolean @default(false)
+  automationAddonChargeId String?
+  automationAddonPrice    Float?  @default(5)
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
@@ -187,6 +208,16 @@ model WatchedProduct {
 
   // Prix actuel du marchand pour comparaison
   myCurrentPrice    Float?
+
+  // Automation+ (pilotage par ligne)
+  automationEnabled        Boolean   @default(false)
+  automationPricingAdvice  Boolean   @default(true)
+  automationAlerts         Boolean   @default(true)
+  automationFrequencyHours Int       @default(24)
+  automationThresholdPct   Float     @default(1)
+  automationLastRunAt      DateTime?
+  automationLastStatus     String?
+  automationLastError      String?   @db.Text
 
   isActive          Boolean   @default(true)
 

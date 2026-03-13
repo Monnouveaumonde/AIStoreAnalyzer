@@ -10,7 +10,7 @@
  *  - Filtrer par sévérité et catégorie
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page,
@@ -37,9 +37,14 @@ import { useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { applyOptimization } from "../services/seo/seo-optimizer.server";
+import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    throw redirect("/app/billing?source=seo");
+  }
   const { id } = params;
 
   const scan = await prisma.seoScan.findUnique({
@@ -56,7 +61,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    return redirect("/app/billing?source=seo");
+  }
   const { id: seoScanId } = params;
   const formData = await request.formData();
   const intent = formData.get("intent");
@@ -127,11 +136,13 @@ function IssueCard({
   shopId,
   seoScanId,
   onApply,
+  onMarkFixed,
 }: {
   issue: any;
   shopId: string;
   seoScanId: string;
   onApply: (issueId: string, newValue: string) => void;
+  onMarkFixed: (issueId: string) => void;
 }) {
   const [editedValue, setEditedValue] = useState(issue.suggestedValue ?? issue.currentValue ?? "");
   const [showEdit, setShowEdit] = useState(false);
@@ -234,9 +245,7 @@ function IssueCard({
                 </Button>
                 <Button
                   variant="plain"
-                  onClick={() => {
-                    /* mark_fixed handled by parent via submit */
-                  }}
+                  onClick={() => onMarkFixed(issue.id)}
                 >
                   Marquer comme corrigé
                 </Button>
@@ -282,6 +291,19 @@ export default function SeoScanDetailPage() {
       setToastActive(true);
     },
     [shopId, submit]
+  );
+
+  const handleMarkFixed = useCallback(
+    (issueId: string) => {
+      const data = new FormData();
+      data.set("intent", "mark_fixed");
+      data.set("issueId", issueId);
+      submit(data, { method: "post" });
+      setToastMessage("Issue marquee comme corrigee.");
+      setToastError(false);
+      setToastActive(true);
+    },
+    [submit]
   );
 
   // Filtrage des issues
@@ -389,6 +411,7 @@ export default function SeoScanDetailPage() {
                           shopId={shopId}
                           seoScanId={scan.id}
                           onApply={handleApply}
+                          onMarkFixed={handleMarkFixed}
                         />
                       ))}
                     </BlockStack>
@@ -410,6 +433,7 @@ export default function SeoScanDetailPage() {
                         shopId={shopId}
                         seoScanId={scan.id}
                         onApply={handleApply}
+                        onMarkFixed={handleMarkFixed}
                       />
                     ))}
                   </BlockStack>

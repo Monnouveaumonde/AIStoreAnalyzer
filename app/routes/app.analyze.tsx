@@ -12,6 +12,8 @@ import {
   ProgressBar,
   Spinner,
   Box,
+  Badge,
+  InlineStack,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -24,11 +26,16 @@ import { nanoid } from "../lib/utils.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const check = await canRunAnalysis(session.shop);
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { plan: true },
+  });
 
   return json({
     canAnalyze: check.allowed,
     reason: check.reason,
     shopDomain: session.shop,
+    plan: shop?.plan ?? "FREE",
   });
 };
 
@@ -142,7 +149,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function AnalyzePage() {
-  const { canAnalyze, reason, shopDomain } = useLoaderData<typeof loader>();
+  const { canAnalyze, reason, shopDomain, plan } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const submit = useSubmit();
@@ -181,6 +188,15 @@ export default function AnalyzePage() {
                       Analyse en cours... Cela peut prendre 15 à 30 secondes.
                     </Text>
                     <ProgressBar progress={50} tone="highlight" />
+                    {plan === "FREE" && (
+                      <Banner tone="info">
+                        <Text as="p">
+                          Pendant que l'analyse tourne : debloquez les modules SEO Optimizer et
+                          Espionnage concurrentiel avec un plan payant.
+                        </Text>
+                        <Button url="/app/billing">Voir les plans</Button>
+                      </Banner>
+                    )}
                   </BlockStack>
                 </Box>
               )}
@@ -240,6 +256,43 @@ export default function AnalyzePage() {
                   </BlockStack>
                 </Box>
               ))}
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text variant="headingMd" as="h3">Modules premium</Text>
+                {plan === "FREE" ? (
+                  <Badge tone="attention">Verrouille en Free</Badge>
+                ) : (
+                  <Badge tone="success">Inclus dans votre plan</Badge>
+                )}
+              </InlineStack>
+              <Text variant="bodySm" as="p" tone="subdued">
+                Activez ces modules pour transformer le diagnostic en actions automatiques
+                (optimisation SEO et reponse aux variations de prix concurrentes).
+              </Text>
+              <BlockStack gap="200">
+                <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
+                  <Text variant="bodySm" as="p" fontWeight="semibold">SEO Optimizer</Text>
+                  <Text variant="bodySm" as="p" tone="subdued">Corrections SEO assistees par IA.</Text>
+                </Box>
+                <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
+                  <Text variant="bodySm" as="p" fontWeight="semibold">Espionnage concurrentiel</Text>
+                  <Text variant="bodySm" as="p" tone="subdued">Alertes prix + suggestions de reaction.</Text>
+                </Box>
+              </BlockStack>
+              {plan === "FREE" ? (
+                <Button variant="primary" url="/app/billing">
+                  Debloquer les modules
+                </Button>
+              ) : (
+                <InlineStack gap="200">
+                  <Button url="/app/seo">Ouvrir SEO</Button>
+                  <Button url="/app/competitive">Ouvrir Watcher</Button>
+                </InlineStack>
+              )}
             </BlockStack>
           </Card>
         </Layout.Section>

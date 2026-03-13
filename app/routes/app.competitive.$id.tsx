@@ -10,7 +10,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
+import { useActionData, useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -31,13 +31,87 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { scrapeProductPrice } from "../services/competitive/price-scraper.server";
 import { generatePriceSuggestion } from "../services/competitive/price-ai.server";
+import { analyzeCompetitivePage } from "../services/competitive/competitive-analysis.server";
+import { hasFeatureAccess } from "../services/billing/plans.server";
+
+async function fetchOwnProductSignals(admin: any, shopifyProductId: string) {
+  if (!admin || !shopifyProductId.startsWith("gid://shopify/Product/")) {
+    return null;
+  }
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query ProductComparison($id: ID!) {
+        product(id: $id) {
+          id
+          title
+          descriptionHtml
+          priceRangeV2 {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+          images(first: 12) {
+            edges {
+              node {
+                id
+              }
+            }
+          }
+        }
+      }
+    `,
+      { variables: { id: shopifyProductId } }
+    );
+    const payload = await response.json();
+    const product = payload?.data?.product;
+    if (!product) return null;
+    return {
+      title: product.title ?? null,
+      contentLength: (product.descriptionHtml ?? "").replace(/<[^>]+>/g, " ").length,
+      imageCount: product.images?.edges?.length ?? 0,
+      price: product.priceRangeV2?.minVariantPrice?.amount
+        ? Number(product.priceRangeV2.minVariantPrice.amount)
+        : null,
+      currency: product.priceRangeV2?.minVariantPrice?.currencyCode ?? "EUR",
+    };
+  } catch {
+    return null;
+  }
+}
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const url = new URL(request.url);
+  let shopDomain = (url.searchParams.get("shop") ?? "").trim();
+  let admin: any = null;
+  try {
+    const auth = await authenticate.admin(request);
+    const { session } = auth;
+    if (session?.shop) shopDomain = session.shop;
+    admin = auth.admin;
+  } catch (error) {
+    if (!shopDomain) throw error;
+  }
+
+  if (!shopDomain) {
+    throw redirect("/auth/login");
+  }
+
+  const paidAccess = await hasFeatureAccess(shopDomain, "competitive_compare_advanced");
+  if (!paidAccess.allowed) {
+    throw redirect("/app/billing?source=competitive");
+  }
   const { id } = params;
 
-  const watchedProduct = await prisma.watchedProduct.findUnique({
-    where: { id },
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: { id: true, shopDomain: true },
+  });
+  if (!shop) throw new Response("Boutique introuvable", { status: 404 });
+
+  const watchedProduct = await prisma.watchedProduct.findFirst({
+    where: { id, shopId: shop.id, isActive: true },
     include: {
       priceHistory: { orderBy: { capturedAt: "desc" }, take: 30 },
       alerts: { orderBy: { createdAt: "desc" }, take: 20 },
@@ -47,77 +121,129 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   if (!watchedProduct) throw new Response("Produit introuvable", { status: 404 });
 
-  return json({ watchedProduct });
+  const ownSignals = await fetchOwnProductSignals(admin, watchedProduct.shopifyProductId);
+  const comparison = await analyzeCompetitivePage({
+    competitorUrl: watchedProduct.competitorUrl,
+    own: {
+      title: ownSignals?.title ?? watchedProduct.shopifyProductTitle,
+      price: ownSignals?.price ?? watchedProduct.myCurrentPrice,
+      currency: ownSignals?.currency ?? "EUR",
+      imageCount: ownSignals?.imageCount ?? null,
+      contentLength: ownSignals?.contentLength ?? null,
+    },
+  });
+
+  return json({
+    watchedProduct,
+    ownSignals,
+    comparison,
+  });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const { id } = params;
   const formData = await request.formData();
+  const url = new URL(request.url);
+
+  let shopDomain =
+    ((formData.get("shopDomain") as string | null) ?? "").trim() ||
+    (url.searchParams.get("shop") ?? "").trim();
+  try {
+    const { session } = await authenticate.admin(request);
+    if (session?.shop) shopDomain = session.shop;
+  } catch {
+    // fallback shopDomain conservé
+  }
+
+  if (!shopDomain) {
+    return json({ success: false, error: "Contexte boutique manquant." }, { status: 401 });
+  }
+
+  const paidAccess = await hasFeatureAccess(shopDomain, "competitive_compare_advanced");
+  if (!paidAccess.allowed) {
+    return redirect("/app/billing?source=competitive");
+  }
+  const { id } = params;
   const intent = formData.get("intent");
 
-  const watchedProduct = await prisma.watchedProduct.findUnique({ where: { id } });
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
+  if (!shop) return json({ success: false, error: "Boutique introuvable" }, { status: 404 });
+
+  const watchedProduct = await prisma.watchedProduct.findFirst({
+    where: { id, shopId: shop.id, isActive: true },
+  });
   if (!watchedProduct) return json({ error: "Produit introuvable" }, { status: 404 });
 
   if (intent === "check_now") {
     const scraped = await scrapeProductPrice(watchedProduct.competitorUrl);
-    if (scraped.price) {
-      const oldPrice = watchedProduct.lastPrice;
-      await prisma.priceSnapshot.create({
-        data: {
-          watchedProductId: id!,
-          price: scraped.price,
-          currency: scraped.currency,
-          hasPromotion: scraped.hasPromotion,
-          promotionLabel: scraped.promotionLabel,
-          originalPrice: scraped.originalPrice,
-        },
-      });
+    if (!scraped.price) {
       await prisma.watchedProduct.update({
         where: { id },
-        data: { lastPrice: scraped.price, lastCheckedAt: new Date() },
+        data: { lastCheckedAt: new Date() },
       });
+      return json({
+        success: true,
+        checked: false,
+        warning: scraped.error ?? "Prix non récupéré sur la page concurrente.",
+      });
+    }
 
-      // Génération alerte si prix changé
-      if (oldPrice && Math.abs((scraped.price - oldPrice) / oldPrice) > 0.01) {
-        const shop = await prisma.shop.findFirst({ where: { shopDomain: session.shop } });
-        const priceDiffPercent = ((scraped.price - oldPrice) / oldPrice) * 100;
-        const alertType = priceDiffPercent < 0 ? "PRICE_DROP" : "PRICE_INCREASE";
+    const oldPrice = watchedProduct.lastPrice;
+    await prisma.priceSnapshot.create({
+      data: {
+        watchedProductId: id!,
+        price: scraped.price,
+        currency: scraped.currency,
+        hasPromotion: scraped.hasPromotion,
+        promotionLabel: scraped.promotionLabel,
+        originalPrice: scraped.originalPrice,
+      },
+    });
+    await prisma.watchedProduct.update({
+      where: { id },
+      data: { lastPrice: scraped.price, lastCheckedAt: new Date() },
+    });
 
-        let suggestion: string | null = null;
-        try {
-          suggestion = await generatePriceSuggestion({
-            productTitle: watchedProduct.shopifyProductTitle,
-            myPrice: watchedProduct.myCurrentPrice,
-            competitorPrice: scraped.price,
-            competitorName: watchedProduct.competitorName,
-            alertType,
-            priceDiffPercent,
-          });
-        } catch { /* non-bloquant */ }
+    // Génération alerte si prix changé
+    if (oldPrice && Math.abs((scraped.price - oldPrice) / oldPrice) > 0.01) {
+      const priceDiffPercent = ((scraped.price - oldPrice) / oldPrice) * 100;
+      const alertType = priceDiffPercent < 0 ? "PRICE_DROP" : "PRICE_INCREASE";
 
-        if (shop) {
-          await prisma.priceAlert.create({
-            data: {
-              shopId: shop.id,
-              watchedProductId: id!,
-              alertType,
-              oldPrice,
-              newPrice: scraped.price,
-              priceDiffPercent,
-              title: alertType === "PRICE_DROP"
-                ? `Baisse chez ${watchedProduct.competitorName} (${priceDiffPercent.toFixed(1)}%)`
-                : `Hausse chez ${watchedProduct.competitorName} (+${priceDiffPercent.toFixed(1)}%)`,
-              message: `Le prix est passé de ${oldPrice} → ${scraped.price} €`,
-              suggestion,
-            },
-          });
-        }
+      let suggestion: string | null = null;
+      try {
+        suggestion = await generatePriceSuggestion({
+          productTitle: watchedProduct.shopifyProductTitle,
+          myPrice: watchedProduct.myCurrentPrice,
+          competitorPrice: scraped.price,
+          competitorName: watchedProduct.competitorName,
+          alertType,
+          priceDiffPercent,
+        });
+      } catch {
+        // non bloquant
       }
 
-      return json({ success: true, newPrice: scraped.price });
+      await prisma.priceAlert.create({
+        data: {
+          shopId: shop.id,
+          watchedProductId: id!,
+          alertType,
+          oldPrice,
+          newPrice: scraped.price,
+          priceDiffPercent,
+          title:
+            alertType === "PRICE_DROP"
+              ? `Baisse chez ${watchedProduct.competitorName} (${priceDiffPercent.toFixed(1)}%)`
+              : `Hausse chez ${watchedProduct.competitorName} (+${priceDiffPercent.toFixed(1)}%)`,
+          message: `Le prix est passé de ${oldPrice} → ${scraped.price} €`,
+          suggestion,
+        },
+      });
     }
-    return json({ error: scraped.error ?? "Prix non récupéré" }, { status: 400 });
+
+    return json({ success: true, checked: true, newPrice: scraped.price });
   }
 
   if (intent === "delete") {
@@ -132,10 +258,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function WatchedProductDetail() {
-  const { watchedProduct } = useLoaderData<typeof loader>();
+  const { watchedProduct, ownSignals, comparison } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
-  const navigate = useNavigate();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const isChecking = navigation.state === "submitting";
 
@@ -154,7 +280,11 @@ export default function WatchedProductDetail() {
       primaryAction={{
         content: isChecking ? "Vérification..." : "Vérifier maintenant",
         loading: isChecking,
-        onAction: () => submit({ intent: "check_now" }, { method: "post" }),
+        onAction: () =>
+          submit(
+            { intent: "check_now", shopDomain: watchedProduct.shop.shopDomain },
+            { method: "post" },
+          ),
       }}
       secondaryActions={[
         {
@@ -165,6 +295,22 @@ export default function WatchedProductDetail() {
       ]}
     >
       <BlockStack gap="500">
+        {actionData && "checked" in actionData && actionData.checked && (
+          <Banner tone="success">
+            <Text as="p">Vérification effectuée. Le prix concurrent a été mis à jour.</Text>
+          </Banner>
+        )}
+        {actionData && "warning" in actionData && actionData.warning && (
+          <Banner tone="warning">
+            <Text as="p">{String((actionData as any).warning)}</Text>
+          </Banner>
+        )}
+        {actionData && "error" in actionData && actionData.error && (
+          <Banner tone="critical">
+            <Text as="p">{String((actionData as any).error)}</Text>
+          </Banner>
+        )}
+
         {/* Résumé statistiques */}
         <Layout>
           <Layout.Section>
@@ -186,6 +332,113 @@ export default function WatchedProductDetail() {
             </InlineStack>
           </Layout.Section>
         </Layout>
+
+        <Card>
+          <BlockStack gap="200">
+            <Text variant="headingMd" as="h2">Comparatif concurrentiel avancé</Text>
+            <InlineGrid columns={2} gap="200">
+              <Box padding="300" borderWidth="025" borderColor="border" borderRadius="200">
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">Mon produit</Text>
+                  <Text as="p" variant="bodySm">
+                    Titre: {ownSignals?.title ?? watchedProduct.shopifyProductTitle}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Prix: {ownSignals?.price ? `${Number(ownSignals.price).toFixed(2)} ${ownSignals?.currency ?? "EUR"}` : "Non renseigné"}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Images: {ownSignals?.imageCount ?? "N/A"}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Longueur contenu: {ownSignals?.contentLength ?? "N/A"}
+                  </Text>
+                </BlockStack>
+              </Box>
+              <Box padding="300" borderWidth="025" borderColor="border" borderRadius="200">
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">Produit concurrent</Text>
+                  <Text as="p" variant="bodySm">
+                    Titre: {comparison.title ?? watchedProduct.competitorName}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Prix: {comparison.price ? `${comparison.price.toFixed(2)} ${comparison.currency}` : "Non détecté"}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Images: {comparison.imageCount}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    CTA détectés: {comparison.ctaCount}
+                  </Text>
+                  <Text as="p" variant="bodySm">
+                    Vidéo: {comparison.hasVideo ? "Oui" : "Non"}
+                  </Text>
+                </BlockStack>
+              </Box>
+            </InlineGrid>
+
+            {comparison.diagnostic && (
+              <Banner tone="warning">
+                <Text as="p">{comparison.diagnostic}</Text>
+              </Banner>
+            )}
+
+            <InlineGrid columns={3} gap="200">
+              <Card>
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">Points forts concurrent</Text>
+                  {comparison.strengths.length === 0 ? (
+                    <Text as="p" variant="bodySm" tone="subdued">Aucun signal fort détecté.</Text>
+                  ) : (
+                    comparison.strengths.map((s, idx) => (
+                      <Text key={`s-${idx}`} as="p" variant="bodySm">- {s}</Text>
+                    ))
+                  )}
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">Points faibles / risques</Text>
+                  {comparison.weaknesses.length === 0 ? (
+                    <Text as="p" variant="bodySm" tone="subdued">Aucun risque majeur détecté.</Text>
+                  ) : (
+                    comparison.weaknesses.map((w, idx) => (
+                      <Text key={`w-${idx}`} as="p" variant="bodySm">- {w}</Text>
+                    ))
+                  )}
+                </BlockStack>
+              </Card>
+              <Card>
+                <BlockStack gap="100">
+                  <Text variant="headingSm" as="h3">Opportunités & conseils</Text>
+                  {[...comparison.opportunities, ...comparison.recommendations].length === 0 ? (
+                    <Text as="p" variant="bodySm" tone="subdued">Pas de recommandation supplémentaire.</Text>
+                  ) : (
+                    [...comparison.opportunities, ...comparison.recommendations].map((r, idx) => (
+                      <Text key={`r-${idx}`} as="p" variant="bodySm">- {r}</Text>
+                    ))
+                  )}
+                </BlockStack>
+              </Card>
+            </InlineGrid>
+          </BlockStack>
+        </Card>
+
+        <Card>
+          <BlockStack gap="150">
+            <Text variant="headingSm" as="h3">Détails de vérification</Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              URL concurrente: {watchedProduct.competitorUrl}
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              Statut: {watchedProduct.lastPrice ? "Prix détecté" : "Prix non détecté pour l'instant"}
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              Dernier check: {watchedProduct.lastCheckedAt
+                ? new Date(watchedProduct.lastCheckedAt).toLocaleString("fr-FR")
+                : "Jamais"}
+            </Text>
+          </BlockStack>
+        </Card>
 
         <Divider />
 
@@ -284,7 +537,11 @@ export default function WatchedProductDetail() {
         primaryAction={{
           content: "Supprimer",
           destructive: true,
-          onAction: () => submit({ intent: "delete" }, { method: "post" }),
+          onAction: () =>
+            submit(
+              { intent: "delete", shopDomain: watchedProduct.shop.shopDomain },
+              { method: "post" },
+            ),
         }}
         secondaryActions={[{ content: "Annuler", onAction: () => setDeleteModalOpen(false) }]}
       >

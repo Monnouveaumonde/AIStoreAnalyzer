@@ -42,6 +42,10 @@ export const PLANS = {
 } as const;
 
 export type PlanType = keyof typeof PLANS;
+export type FeatureKey =
+  | "competitive_compare_advanced"
+  | "competitive_automation_plus"
+  | "seo_optimizer";
 
 export async function createSubscription(
   admin: AdminApiContext,
@@ -94,6 +98,53 @@ export async function createSubscription(
   return result?.confirmationUrl || null;
 }
 
+export async function createAutomationAddonSubscription(
+  admin: AdminApiContext,
+  shopDomain: string
+): Promise<string | null> {
+  const response = await admin.graphql(
+    `
+    mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
+      appSubscriptionCreate(
+        name: $name
+        lineItems: $lineItems
+        returnUrl: $returnUrl
+        test: $test
+      ) {
+        appSubscription { id }
+        confirmationUrl
+        userErrors { field message }
+      }
+    }
+  `,
+    {
+      variables: {
+        name: "ShopPulseAi - Automation+ Addon",
+        lineItems: [
+          {
+            plan: {
+              appRecurringPricingDetails: {
+                price: { amount: 5, currencyCode: "USD" },
+                interval: "EVERY_30_DAYS",
+              },
+            },
+          },
+        ],
+        returnUrl: `${process.env.APP_URL}/app/billing/callback?addon=automation_plus&shop=${shopDomain}`,
+        test: process.env.NODE_ENV !== "production",
+      },
+    }
+  );
+
+  const data = await response.json();
+  const result = data.data?.appSubscriptionCreate;
+  if (result?.userErrors?.length > 0) {
+    console.error("Addon billing errors:", result.userErrors);
+    return null;
+  }
+  return result?.confirmationUrl || null;
+}
+
 export async function checkAndResetMonthlyLimits(shopDomain: string): Promise<void> {
   const shop = await prisma.shop.findUnique({ where: { shopDomain } });
   if (!shop) return;
@@ -131,4 +182,43 @@ export async function canRunAnalysis(shopDomain: string): Promise<{ allowed: boo
   }
 
   return { allowed: true };
+}
+
+export async function hasPaidModulesAccess(shopDomain: string): Promise<{ allowed: boolean; reason?: string }> {
+  return hasFeatureAccess(shopDomain, "competitive_compare_advanced");
+}
+
+export async function hasFeatureAccess(
+  shopDomain: string,
+  feature: FeatureKey
+): Promise<{ allowed: boolean; reason?: string }> {
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    include: { subscription: true },
+  });
+
+  if (!shop) return { allowed: false, reason: "Boutique non trouvée" };
+  const isPaidPlan = shop.plan === "PRO" || shop.plan === "GROWTH";
+
+  if (feature === "competitive_compare_advanced" || feature === "seo_optimizer") {
+    if (!isPaidPlan) {
+      return {
+        allowed: false,
+        reason: "Module reserve aux plans payants (Pro ou Growth).",
+      };
+    }
+    return { allowed: true };
+  }
+
+  if (feature === "competitive_automation_plus") {
+    if (!isPaidPlan) {
+      return { allowed: false, reason: "Automation+ disponible sur PRO ou GROWTH." };
+    }
+    if (!shop.subscription?.automationAddonActive) {
+      return { allowed: false, reason: "Activez l'option Automation+ (+$5/mois)." };
+    }
+    return { allowed: true };
+  }
+
+  return { allowed: false, reason: "Feature non reconnue." };
 }

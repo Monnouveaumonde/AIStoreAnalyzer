@@ -19,6 +19,34 @@ export interface ScrapedProduct {
   error: string | null;
 }
 
+function parseLocalizedPrice(raw: string): number | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/[^\d.,\s]/g, "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (!cleaned) return null;
+
+  // Cas "1 299,90" ou "1.299,90"
+  let normalized = cleaned.replace(/\s/g, "");
+  if (normalized.includes(",") && normalized.includes(".")) {
+    const lastComma = normalized.lastIndexOf(",");
+    const lastDot = normalized.lastIndexOf(".");
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (normalized.includes(",")) {
+    normalized = normalized.replace(",", ".");
+  }
+
+  const value = Number.parseFloat(normalized);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /**
  * Tente d'extraire le prix d'un produit concurrent depuis son URL.
  * Stratégie en 3 couches :
@@ -56,6 +84,7 @@ export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
     }
 
     const html = await response.text();
+    const htmlNormalized = html.replace(/&nbsp;|&#160;/gi, " ");
 
     // ── Couche 1 : JSON-LD schema.org ──────────────────────────────────────
     const jsonLdMatches = html.matchAll(
@@ -114,20 +143,42 @@ export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
     // ── Couche 2 : Balises meta Shopify / OG ───────────────────────────────
     if (!result.price) {
       // Shopify expose souvent ces meta tags
-      const shopifyPriceMatch = html.match(
+      const shopifyPriceMatch = htmlNormalized.match(
         /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([0-9.,]+)["']/i
       );
       if (shopifyPriceMatch) {
-        result.price = parseFloat(shopifyPriceMatch[1].replace(",", "."));
+        result.price = parseLocalizedPrice(shopifyPriceMatch[1]);
       }
 
-      const currencyMatch = html.match(
+      const currencyMatch = htmlNormalized.match(
         /<meta[^>]+property=["']product:price:currency["'][^>]+content=["']([A-Z]{3})["']/i
       );
       if (currencyMatch) result.currency = currencyMatch[1];
 
+      // Microdata itemprop
+      if (!result.price) {
+        const microPriceMatch = htmlNormalized.match(
+          /itemprop=["']price["'][^>]*content=["']([0-9.,\s]+)["']/i
+        );
+        if (microPriceMatch) {
+          result.price = parseLocalizedPrice(microPriceMatch[1]);
+        }
+      }
+      if (!result.price) {
+        const microPriceInlineMatch = htmlNormalized.match(
+          /itemprop=["']price["'][^>]*>\s*([0-9][0-9\s.,]+)/i
+        );
+        if (microPriceInlineMatch) {
+          result.price = parseLocalizedPrice(microPriceInlineMatch[1]);
+        }
+      }
+      const microCurrencyMatch = htmlNormalized.match(
+        /itemprop=["']priceCurrency["'][^>]*content=["']([A-Z]{3})["']/i
+      );
+      if (microCurrencyMatch) result.currency = microCurrencyMatch[1];
+
       // Titre OG
-      const ogTitleMatch = html.match(
+      const ogTitleMatch = htmlNormalized.match(
         /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
       );
       if (ogTitleMatch && !result.title) result.title = ogTitleMatch[1];
@@ -140,14 +191,23 @@ export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
         /data-price=["']([0-9]+(?:[.,][0-9]{1,2})?)["']/i,
         /class=["'][^"']*price[^"']*["'][^>]*>\s*[€$£]?\s*([0-9]+[.,][0-9]{2})/i,
         /"price":\s*"?([0-9]+(?:[.,][0-9]{1,2})?)"?/i,
+        /"price_amount"\s*:\s*"?([0-9]+(?:[.,][0-9]{1,2})?)"?/i,
+        /"amount"\s*:\s*"?([0-9]+(?:[.,][0-9]{1,2})?)"?/i,
+        /([0-9]{1,3}(?:[ .][0-9]{3})*(?:[.,][0-9]{2}))\s?(?:€|EUR)\b/i,
+        /(?:€|EUR)\s?([0-9]{1,3}(?:[ .][0-9]{3})*(?:[.,][0-9]{2}))\b/i,
+        /"price"\s*:\s*([0-9]{3,7})\b/i, // parfois en centimes
       ];
 
       for (const pattern of pricePatterns) {
-        const match = html.match(pattern);
+        const match = htmlNormalized.match(pattern);
         if (match) {
-          const raw = match[1].replace(",", ".");
-          result.price = parseFloat(raw);
-          if (result.price > 0) break;
+          const raw = match[1];
+          const parsed = parseLocalizedPrice(raw);
+          if (parsed && parsed > 0) {
+            // Fallback "prix en centimes" pour certains JSON thèmes Shopify.
+            result.price = parsed >= 1000 ? parsed / 100 : parsed;
+            break;
+          }
         }
       }
     }
@@ -158,7 +218,7 @@ export async function scrapeProductPrice(url: string): Promise<ScrapedProduct> {
         /sale|solde|promo|discount|réduction|offre|deal|flash/i,
       ];
       for (const kw of promoKeywords) {
-        if (kw.test(html.slice(0, 50000))) {
+        if (kw.test(htmlNormalized.slice(0, 50000))) {
           result.hasPromotion = true;
           result.promotionLabel = "Promotion détectée";
           break;

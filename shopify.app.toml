@@ -32,15 +32,7 @@ api_version = "2025-01"
   uri = "/webhooks"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/data_request" ]
-  uri = "/webhooks"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/redact" ]
-  uri = "/webhooks"
-
-  [[webhooks.subscriptions]]
-  topics = [ "shop/redact" ]
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
   uri = "/webhooks"
 
 # app_store et pos : configurer dans Partners Dashboard si besoin

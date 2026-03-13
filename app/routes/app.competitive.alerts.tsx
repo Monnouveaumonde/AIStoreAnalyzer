@@ -9,7 +9,7 @@
  *  - Voir la suggestion IA associée
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSubmit } from "@remix-run/react";
 import {
   Page,
@@ -27,9 +27,14 @@ import {
 import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    throw redirect("/app/billing?source=competitive");
+  }
   const url = new URL(request.url);
   const filter = url.searchParams.get("filter") || "ALL";
 
@@ -62,6 +67,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const paidAccess = await hasPaidModulesAccess(session.shop);
+  if (!paidAccess.allowed) {
+    return redirect("/app/billing?source=competitive");
+  }
   const formData = await request.formData();
   const intent = formData.get("intent");
   const alertId = formData.get("alertId") as string;

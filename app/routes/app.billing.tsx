@@ -18,7 +18,11 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { PLANS, createSubscription } from "../services/billing/plans.server";
+import {
+  PLANS,
+  createAutomationAddonSubscription,
+  createSubscription,
+} from "../services/billing/plans.server";
 import type { PlanType } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -30,6 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     currentPlan: shop?.plan || "FREE",
+    automationAddonActive: Boolean(shop?.subscription?.automationAddonActive),
     shopDomain: session.shop,
     plans: PLANS,
   });
@@ -38,6 +43,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = (formData.get("intent") as string | null) ?? "change_plan";
+
+  if (intent === "toggle_automation_addon") {
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain: session.shop },
+      include: { subscription: true },
+    });
+    if (!shop) return json({ error: "Boutique introuvable" }, { status: 404 });
+    if (shop.plan === "FREE") {
+      return json({ error: "Passez d'abord au plan PRO ou GROWTH." }, { status: 400 });
+    }
+
+    if (shop.subscription?.automationAddonActive) {
+      await prisma.subscription.update({
+        where: { shopId: shop.id },
+        data: {
+          automationAddonActive: false,
+          automationAddonChargeId: null,
+        },
+      });
+      return json({ success: true, message: "Automation+ désactivé." });
+    }
+
+    const confirmationUrl = await createAutomationAddonSubscription(admin, session.shop);
+    if (confirmationUrl) return redirect(confirmationUrl);
+    return json({ error: "Erreur lors de l'activation d'Automation+." }, { status: 500 });
+  }
+
   const plan = formData.get("plan") as PlanType;
 
   if (!plan || !PLANS[plan]) {
@@ -120,13 +153,20 @@ function PlanCard({
 }
 
 export default function BillingPage() {
-  const { currentPlan, plans } = useLoaderData<typeof loader>();
+  const { currentPlan, plans, automationAddonActive } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
 
   const handleSelect = (plan: string) => {
     const formData = new FormData();
+    formData.set("intent", "change_plan");
     formData.set("plan", plan);
+    submit(formData, { method: "post" });
+  };
+
+  const handleToggleAddon = () => {
+    const formData = new FormData();
+    formData.set("intent", "toggle_automation_addon");
     submit(formData, { method: "post" });
   };
 
@@ -169,6 +209,34 @@ export default function BillingPage() {
               <List.Item>14 jours d'essai gratuit pour les plans payants</List.Item>
               <List.Item>Support par email sous 24h</List.Item>
             </List>
+          </BlockStack>
+        </Card>
+
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text variant="headingMd" as="h3">Option Automation+ (add-on)</Text>
+              {automationAddonActive ? (
+                <Badge tone="success">Actif</Badge>
+              ) : (
+                <Badge tone="attention">+ $5/mois</Badge>
+              )}
+            </InlineStack>
+            <Text as="p" tone="subdued">
+              Débloque l'automatisation avancée concurrentielle: vérif auto par ligne,
+              seuil de déclenchement, alertes automatiques et recommandations pricing.
+            </Text>
+            <Button
+              variant={automationAddonActive ? "secondary" : "primary"}
+              onClick={handleToggleAddon}
+              disabled={currentPlan === "FREE"}
+            >
+              {currentPlan === "FREE"
+                ? "Disponible sur PRO/GROWTH"
+                : automationAddonActive
+                ? "Désactiver Automation+"
+                : "Activer Automation+ (+$5/mois)"}
+            </Button>
           </BlockStack>
         </Card>
       </BlockStack>

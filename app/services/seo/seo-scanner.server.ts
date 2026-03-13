@@ -344,7 +344,6 @@ async function scanPages(admin: AdminApiContext) {
             handle
             bodySummary
             body
-            seo { title description }
           }
         }
       }
@@ -360,44 +359,12 @@ async function scanPages(admin: AdminApiContext) {
   const headingStats = { missingH1: 0 };
 
   for (const page of pages) {
-    const seoTitle = page.seo?.title ?? "";
-    const seoDesc = page.seo?.description ?? "";
     const bodyText = (page.body ?? "").replace(/<[^>]+>/g, " ").trim();
 
-    if (!seoTitle) {
-      metaStats.missingTitle++;
-      issues.push({
-        issueType: "MISSING_META_TITLE",
-        severity: "ERROR",
-        category: "meta",
-        resourceType: "page",
-        resourceId: page.id,
-        resourceTitle: page.title,
-        resourceUrl: `/pages/${page.handle}`,
-        description: `La page "${page.title}" n'a pas de meta title.`,
-        currentValue: null,
-        suggestedValue: null,
-      });
-    } else {
-      const titleKey = seoTitle.toLowerCase().trim();
-      if (!metaTitles.has(titleKey)) metaTitles.set(titleKey, page.id);
-    }
-
-    if (!seoDesc) {
-      metaStats.missingDesc++;
-      issues.push({
-        issueType: "MISSING_META_DESCRIPTION",
-        severity: "ERROR",
-        category: "meta",
-        resourceType: "page",
-        resourceId: page.id,
-        resourceTitle: page.title,
-        resourceUrl: `/pages/${page.handle}`,
-        description: `La page "${page.title}" n'a pas de meta description.`,
-        currentValue: null,
-        suggestedValue: bodyText.length > 0 ? bodyText.substring(0, 155) : null,
-      });
-    }
+    // Sur l'API actuelle, le type Page n'expose pas les champs SEO.
+    // On utilise le titre de page pour la détection de doublons cross-ressources.
+    const titleKey = (page.title ?? "").toLowerCase().trim();
+    if (titleKey && !metaTitles.has(titleKey)) metaTitles.set(titleKey, page.id);
 
     const h1Count = (page.body ?? "").match(/<h1[^>]*>/gi)?.length ?? 0;
     if (h1Count === 0 && bodyText.length > 100) {

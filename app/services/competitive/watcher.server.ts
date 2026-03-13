@@ -83,6 +83,76 @@ export async function runPriceChecks(shopDomain: string): Promise<number> {
 }
 
 /**
+ * Vérifie uniquement les produits "en retard" (jamais checkés ou >24h),
+ * avec une limite pour éviter les timeouts HTTP.
+ */
+export async function runStalePriceChecks(
+  shopDomain: string,
+  maxProducts = 3,
+  options?: { onlyAutomation?: boolean }
+): Promise<{ checkedProducts: number; alertsGenerated: number }> {
+  const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const safeMax = Number.isFinite(maxProducts)
+    ? Math.min(Math.max(Math.floor(maxProducts), 1), 20)
+    : 3;
+
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+    select: { id: true },
+  });
+  if (!shop) return { checkedProducts: 0, alertsGenerated: 0 };
+
+  const staleProducts = await prisma.watchedProduct.findMany({
+    where: {
+      shopId: shop.id,
+      isActive: true,
+      ...(options?.onlyAutomation ? { automationEnabled: true } : {}),
+      OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: threshold } }],
+    },
+    select: {
+      id: true,
+      competitorUrl: true,
+      competitorName: true,
+      lastPrice: true,
+      myCurrentPrice: true,
+      shopifyProductTitle: true,
+      automationThresholdPct: true,
+      automationAlerts: true,
+      automationPricingAdvice: true,
+    },
+    orderBy: { lastCheckedAt: "asc" },
+    take: safeMax,
+  });
+
+  if (staleProducts.length === 0) {
+    return { checkedProducts: 0, alertsGenerated: 0 };
+  }
+
+  let alertsGenerated = 0;
+  const batchSize = 3;
+  for (let i = 0; i < staleProducts.length; i += batchSize) {
+    const batch = staleProducts.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map((wp) => checkSingleProduct(wp, shop.id))
+    );
+    alertsGenerated += results.filter(
+      (r) => r.status === "fulfilled" && r.value === true
+    ).length;
+  }
+
+  return { checkedProducts: staleProducts.length, alertsGenerated };
+}
+
+/**
+ * Lance un check auto si au moins un produit n'a pas été vérifié
+ * depuis plus de 24h (ou jamais vérifié).
+ */
+export async function runDailyCheckIfNeeded(shopDomain: string): Promise<boolean> {
+  const result = await runStalePriceChecks(shopDomain, 3);
+  return result.checkedProducts > 0;
+}
+
+/**
  * Vérifie le prix d'un produit surveillé unique.
  * Crée un snapshot et génère une alerte si le prix a changé.
  * Retourne true si une alerte a été générée.
@@ -95,12 +165,24 @@ async function checkSingleProduct(
     lastPrice: number | null;
     myCurrentPrice: number | null;
     shopifyProductTitle: string;
+    automationThresholdPct?: number | null;
+    automationAlerts?: boolean | null;
+    automationPricingAdvice?: boolean | null;
   },
   shopId: string
 ): Promise<boolean> {
   const scraped = await scrapeProductPrice(watchedProduct.competitorUrl);
 
   if (scraped.error || scraped.price === null) {
+    await prisma.watchedProduct.update({
+      where: { id: watchedProduct.id },
+      data: {
+        lastCheckedAt: new Date(),
+        automationLastRunAt: new Date(),
+        automationLastStatus: "error",
+        automationLastError: scraped.error ?? "Prix non détecté",
+      },
+    });
     return false;
   }
 
@@ -125,6 +207,9 @@ async function checkSingleProduct(
     data: {
       lastPrice: newPrice,
       lastCheckedAt: new Date(),
+      automationLastRunAt: new Date(),
+      automationLastStatus: "success",
+      automationLastError: null,
     },
   });
 
@@ -135,7 +220,9 @@ async function checkSingleProduct(
   const priceDiffPercent = (priceDiff / oldPrice) * 100;
 
   // Seuil de déclenchement : changement > 1% (évite le bruit sur les centimes)
-  if (Math.abs(priceDiffPercent) < 1 && !scraped.hasPromotion) return false;
+  const threshold = watchedProduct.automationThresholdPct ?? 1;
+  if (Math.abs(priceDiffPercent) < threshold && !scraped.hasPromotion) return false;
+  if (watchedProduct.automationAlerts === false) return false;
 
   // Détermination du type d'alerte
   let alertType: "PRICE_DROP" | "PRICE_INCREASE" | "PROMOTION_STARTED" | "PROMOTION_ENDED";
@@ -160,17 +247,19 @@ async function checkSingleProduct(
 
   // Génération de la suggestion IA (non bloquante)
   let suggestion: string | null = null;
-  try {
-    suggestion = await generatePriceSuggestion({
-      productTitle: watchedProduct.shopifyProductTitle,
-      myPrice: watchedProduct.myCurrentPrice,
-      competitorPrice: newPrice,
-      competitorName: watchedProduct.competitorName,
-      alertType,
-      priceDiffPercent,
-    });
-  } catch {
-    // Si l'IA échoue, on continue sans suggestion
+  if (watchedProduct.automationPricingAdvice !== false) {
+    try {
+      suggestion = await generatePriceSuggestion({
+        productTitle: watchedProduct.shopifyProductTitle,
+        myPrice: watchedProduct.myCurrentPrice,
+        competitorPrice: newPrice,
+        competitorName: watchedProduct.competitorName,
+        alertType,
+        priceDiffPercent,
+      });
+    } catch {
+      // Si l'IA échoue, on continue sans suggestion
+    }
   }
 
   await prisma.priceAlert.create({

@@ -7,6 +7,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const url = new URL(request.url);
   const plan = url.searchParams.get("plan") as "PRO" | "GROWTH" | null;
+  const addon = url.searchParams.get("addon");
   const chargeId = url.searchParams.get("charge_id");
 
   if (plan && chargeId) {
@@ -36,6 +37,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           status: "ACTIVE",
           currentPeriodStart: new Date(),
           currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        },
+      });
+    }
+  }
+
+  if (addon === "automation_plus" && chargeId) {
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain: session.shop },
+    });
+
+    if (shop) {
+      await prisma.subscription.upsert({
+        where: { shopId: shop.id },
+        create: {
+          shopId: shop.id,
+          shopifyChargeId: null,
+          plan: shop.plan,
+          status: "ACTIVE",
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          automationAddonActive: true,
+          automationAddonChargeId: chargeId,
+          automationAddonPrice: 5,
+        },
+        update: {
+          automationAddonActive: true,
+          automationAddonChargeId: chargeId,
+          automationAddonPrice: 5,
         },
       });
     }

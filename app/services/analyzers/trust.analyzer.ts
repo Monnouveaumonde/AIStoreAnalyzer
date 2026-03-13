@@ -26,10 +26,6 @@ export async function analyzeTrust(admin: AdminApiContext): Promise<TrustResult>
           name
           email
           primaryDomain { host }
-          privacyPolicy { id title }
-          termsOfService { id title }
-          refundPolicy { id title }
-          shippingPolicy { id title }
         }
       }
     `),
@@ -54,10 +50,46 @@ export async function analyzeTrust(admin: AdminApiContext): Promise<TrustResult>
   const shop = shopData.data?.shop;
   const pages = pagesData.data?.pages?.edges?.map((e: any) => e.node) || [];
 
-  const hasPrivacy = !!shop?.privacyPolicy;
-  const hasTerms = !!shop?.termsOfService;
-  const hasRefund = !!shop?.refundPolicy;
-  const hasShipping = !!shop?.shippingPolicy;
+  const normalizedPages = pages.map((p: any) => {
+    const title = (p?.title || "").toLowerCase();
+    const handle = (p?.handle || "").toLowerCase();
+    const summary = (p?.bodySummary || "").toLowerCase();
+    return `${title} ${handle} ${summary}`;
+  });
+
+  const hasPageMatching = (patterns: string[]) =>
+    normalizedPages.some((text: string) => patterns.some((pattern) => text.includes(pattern)));
+
+  const hasPrivacy = hasPageMatching([
+    "privacy",
+    "confidentialite",
+    "confidentialité",
+    "politique de confidentialité",
+    "rgpd",
+    "gdpr",
+  ]);
+  const hasTerms = hasPageMatching([
+    "terms",
+    "conditions",
+    "conditions générales",
+    "conditions generales",
+    "terms of service",
+    "cgv",
+  ]);
+  const hasRefund = hasPageMatching([
+    "refund",
+    "retour",
+    "retours",
+    "remboursement",
+    "returns",
+  ]);
+  const hasShipping = hasPageMatching([
+    "shipping",
+    "livraison",
+    "expédition",
+    "expedition",
+    "delivery",
+  ]);
   const hasContact = !!shop?.email;
 
   const pageContent = pages.map((p: any) => (p.bodySummary || "").toLowerCase()).join(" ");
