@@ -117,14 +117,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let failed = 0;
     let skipped = 0;
 
-    console.log(`[auto-fix] Début application: ${fixableIssues.length} issues, suggestionsMap size=${suggestionsMap.size}`);
-    console.log(`[auto-fix] Types: ${fixableIssues.slice(0, 5).map(i => `${i.issueType}(${i.id.substring(0,8)})`).join(", ")}`);
-    console.log(`[auto-fix] MapKeys: ${[...suggestionsMap.keys()].slice(0, 5).map(k => k.substring(0,8)).join(", ")}`);
-    if (fixableIssues.length > 0) {
-      const sample = fixableIssues[0];
-      const fn = sample.issueType.includes("META_TITLE") ? "metaTitle" : sample.issueType.includes("META_DESCRIPTION") ? "metaDescription" : sample.issueType === "MISSING_ALT_TEXT" ? "altText" : null;
-      console.log(`[auto-fix] Sample: id=${sample.id}, type=${sample.issueType}, fieldName=${fn}, inMap=${suggestionsMap.has(sample.id)}`);
-    }
+    console.log(`[auto-fix] Application: ${fixableIssues.length} issues, ${suggestionsMap.size} suggestions`);
 
     for (const issue of fixableIssues) {
       const fieldName =
@@ -134,11 +127,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : null;
 
       const suggestion = suggestionsMap.get(issue.id);
-      if (!fieldName || !suggestion) {
-        console.log(`[auto-fix] SKIP: id=${issue.id}, type=${issue.issueType}, fieldName=${fieldName}, hasSuggestion=${!!suggestion}`);
-        skipped++;
-        continue;
-      }
+      if (!fieldName || !suggestion) { skipped++; continue; }
 
       try {
         console.log(`[auto-fix] Applying ${fieldName} on ${issue.resourceType} ${issue.resourceId}: "${suggestion.substring(0, 50)}..."`);

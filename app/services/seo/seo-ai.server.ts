@@ -55,16 +55,18 @@ Réponds UNIQUEMENT avec le meta title, sans explication, sans guillemets.`;
   try {
     const result = await callAI(prompt, 80);
     const clean = result.trim().replace(/^["']|["']$/g, "");
-    return {
-      value: clean,
-      charCount: clean.length,
-      keyword: input.resourceTitle.split(" ")[0],
-    };
+    if (clean.length >= 5) {
+      return {
+        value: clean,
+        charCount: clean.length,
+        keyword: input.resourceTitle.split(" ")[0],
+      };
+    }
   } catch {
-    // Fallback déterministe
-    const fallback = generateFallbackMetaTitle(input.resourceTitle, input.shopName);
-    return { value: fallback, charCount: fallback.length, keyword: input.resourceTitle.split(" ")[0] };
+    // Fallback ci-dessous
   }
+  const fallback = generateFallbackMetaTitle(input.resourceTitle, input.shopName);
+  return { value: fallback, charCount: fallback.length, keyword: input.resourceTitle.split(" ")[0] };
 }
 
 /**
@@ -95,11 +97,14 @@ Réponds UNIQUEMENT avec la meta description, sans explication, sans guillemets.
   try {
     const result = await callAI(prompt, 200);
     const clean = result.trim().replace(/^["']|["']$/g, "");
-    return { value: clean, charCount: clean.length };
+    if (clean.length >= 10) {
+      return { value: clean, charCount: clean.length };
+    }
   } catch {
-    const fallback = generateFallbackMetaDescription(input.resourceTitle, input.bodyText);
-    return { value: fallback, charCount: fallback.length };
+    // Fallback ci-dessous
   }
+  const fallback = generateFallbackMetaDescription(input.resourceTitle, input.bodyText);
+  return { value: fallback, charCount: fallback.length };
 }
 
 /**
@@ -130,10 +135,13 @@ Réponds UNIQUEMENT avec l'alt text, sans explication, sans guillemets.`;
   try {
     const result = await callAI(prompt, 60);
     const clean = result.trim().replace(/^["']|["']$/g, "");
-    return { value: clean };
+    if (clean.length >= 3) {
+      return { value: clean };
+    }
   } catch {
-    return { value: `${input.productTitle} - ${input.shopName}` };
+    // Fallback ci-dessous
   }
+  return { value: `${input.productTitle} - ${input.shopName}` };
 }
 
 /**
