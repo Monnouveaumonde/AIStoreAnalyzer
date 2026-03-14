@@ -117,6 +117,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let failed = 0;
     let skipped = 0;
 
+    console.log(`[auto-fix] Début application: ${fixableIssues.length} issues, suggestionsMap size=${suggestionsMap.size}`);
+    if (fixableIssues.length > 0) {
+      const sample = fixableIssues[0];
+      console.log(`[auto-fix] Sample issue: id=${sample.id}, type=${sample.issueType}, hasSuggestion=${suggestionsMap.has(sample.id)}, suggestion="${(suggestionsMap.get(sample.id) ?? "").substring(0, 50)}"`);
+    }
+
     for (const issue of fixableIssues) {
       const fieldName =
         issue.issueType.includes("META_TITLE") ? "metaTitle"
@@ -125,7 +131,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : null;
 
       const suggestion = suggestionsMap.get(issue.id);
-      if (!fieldName || !suggestion) { skipped++; continue; }
+      if (!fieldName || !suggestion) {
+        console.log(`[auto-fix] SKIP: id=${issue.id}, type=${issue.issueType}, fieldName=${fieldName}, hasSuggestion=${!!suggestion}`);
+        skipped++;
+        continue;
+      }
 
       try {
         console.log(`[auto-fix] Applying ${fieldName} on ${issue.resourceType} ${issue.resourceId}: "${suggestion.substring(0, 50)}..."`);
