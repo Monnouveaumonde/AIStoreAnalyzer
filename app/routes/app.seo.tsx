@@ -83,11 +83,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Générer les suggestions manquantes à la volée
+    const suggestionsMap = new Map<string, string>();
+    for (const i of fixableIssues) {
+      if (i.suggestedValue) suggestionsMap.set(i.id, i.suggestedValue);
+    }
+
     const issuesNeedingSuggestion = fixableIssues.filter((i) => !i.suggestedValue);
     if (issuesNeedingSuggestion.length > 0) {
       console.log(`[auto-fix] Génération de ${issuesNeedingSuggestion.length} suggestion(s) manquante(s)...`);
       const shopName = shop.shopName ?? session.shop;
-      const suggestions = await batchGenerateSuggestions(
+      const generated = await batchGenerateSuggestions(
         issuesNeedingSuggestion.map((i) => ({
           id: i.id,
           issueType: i.issueType,
@@ -98,16 +103,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopName,
       );
 
-      // Sauvegarder les suggestions en base et les appliquer aux issues en mémoire
-      for (const [issueId, value] of suggestions) {
-        const issue = fixableIssues.find((i) => i.id === issueId);
-        if (issue) (issue as any).suggestedValue = value;
+      for (const [issueId, value] of generated) {
+        suggestionsMap.set(issueId, value);
         await prisma.seoIssue.update({
           where: { id: issueId },
           data: { suggestedValue: value, aiGenerated: true },
         }).catch(() => {});
       }
-      console.log(`[auto-fix] ${suggestions.size} suggestion(s) générée(s)`);
+      console.log(`[auto-fix] ${generated.size} suggestion(s) générée(s), total avec suggestions: ${suggestionsMap.size}`);
     }
 
     let fixed = 0;
@@ -121,9 +124,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         : issue.issueType === "MISSING_ALT_TEXT" ? "altText"
         : null;
 
-      if (!fieldName || !issue.suggestedValue) { skipped++; continue; }
+      const suggestion = suggestionsMap.get(issue.id);
+      if (!fieldName || !suggestion) { skipped++; continue; }
 
       try {
+        console.log(`[auto-fix] Applying ${fieldName} on ${issue.resourceType} ${issue.resourceId}: "${suggestion.substring(0, 50)}..."`);
         const result = await applyOptimization(admin, {
           seoScanId: latestScan.id,
           shopId: shop.id,
@@ -134,11 +139,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           resourceTitle: issue.resourceTitle,
           fieldName,
           oldValue: issue.currentValue,
-          newValue: issue.suggestedValue,
+          newValue: suggestion,
         });
-        if (result.success) fixed++;
-        else failed++;
-      } catch {
+        if (result.success) {
+          console.log(`[auto-fix] OK: ${issue.resourceTitle}`);
+          fixed++;
+        } else {
+          console.log(`[auto-fix] ECHEC: ${issue.resourceTitle} - ${result.error}`);
+          failed++;
+        }
+      } catch (err: any) {
+        console.log(`[auto-fix] ERREUR: ${issue.resourceTitle} - ${err?.message}`);
         failed++;
       }
     }
