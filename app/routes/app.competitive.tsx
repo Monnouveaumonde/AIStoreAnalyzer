@@ -27,7 +27,7 @@ import {
   EmptyState,
   Tooltip,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import {
@@ -258,7 +258,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const myCurrentPriceRaw = (formData.get("myCurrentPrice") as string | null)?.trim() ?? "";
     const myCurrentPrice = myCurrentPriceRaw ? Number(myCurrentPriceRaw) : null;
 
+    console.log(`[add_watch] Ajout manuel: title="${myProductTitle}" competitor="${competitorName}" url="${competitorUrl}" price="${myCurrentPriceRaw}"`);
+
     if (!myProductTitle || !competitorName || !competitorUrl) {
+      console.log(`[add_watch] ERREUR: champ manquant`);
       return json({ success: false, error: "Renseignez produit, concurrent et URL." }, { status: 400 });
     }
 
@@ -318,6 +321,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
+    console.log(`[add_watch] OK: ${watched.id} — ${competitorName} (${competitorUrl}) prix=${initialPrice}`);
     return json({ success: true, added: true });
   }
 
@@ -1334,22 +1338,91 @@ function AddCompetitorPanel({
         </InlineStack>
 
         {showManualForm && (
-          <form method="post" action={contextualAction}>
-            <input type="hidden" name="intent" value="add_watch_manual" />
-            <input type="hidden" name="shopDomain" value={shopDomain} />
-            <BlockStack gap="200">
-              <InlineGrid columns={2} gap="200">
-                <input name="myProductTitle" placeholder="Nom de votre produit" style={inputStyle} />
-                <input name="myCurrentPrice" type="number" step="0.01" placeholder="Votre prix (optionnel)" style={inputStyle} />
-                <input name="competitorName" placeholder="Nom du concurrent" style={inputStyle} />
-                <input name="competitorUrl" type="url" placeholder="https://boutique-concurrente.com/produit" style={inputStyle} />
-              </InlineGrid>
-              <Button submit variant="primary">Ajouter et surveiller</Button>
-            </BlockStack>
-          </form>
+          <ManualAddForm contextualAction={contextualAction} shopDomain={shopDomain} />
         )}
       </BlockStack>
     </Card>
+  );
+}
+
+// ── Composant : formulaire d'ajout manuel avec feedback ───────────────────────
+function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: string; shopDomain: string }) {
+  const fetcher = useFetcher<any>();
+  const [myProductTitle, setMyProductTitle] = useState("");
+  const [myCurrentPrice, setMyCurrentPrice] = useState("");
+  const [competitorName, setCompetitorName] = useState("");
+  const [competitorUrl, setCompetitorUrl] = useState("");
+
+  const isSubmitting = fetcher.state !== "idle";
+  const success = fetcher.data?.success && !fetcher.data?.alreadyExists;
+  const alreadyExists = fetcher.data?.alreadyExists;
+  const error = fetcher.data?.error;
+
+  const handleSubmit = () => {
+    if (!myProductTitle || !competitorName || !competitorUrl) return;
+    const data: Record<string, string> = {
+      intent: "add_watch_manual",
+      shopDomain,
+      myProductTitle,
+      competitorName,
+      competitorUrl,
+    };
+    if (myCurrentPrice) data.myCurrentPrice = myCurrentPrice;
+    fetcher.submit(data, { method: "post", action: contextualAction });
+  };
+
+  useEffect(() => {
+    if (success) {
+      setMyProductTitle("");
+      setMyCurrentPrice("");
+      setCompetitorName("");
+      setCompetitorUrl("");
+    }
+  }, [success]);
+
+  const inputStyle: React.CSSProperties = {
+    padding: "8px 12px", border: "1px solid #ccc", borderRadius: 8, fontSize: 14, width: "100%",
+  };
+
+  return (
+    <BlockStack gap="200">
+      {success && (
+        <Banner tone="success" onDismiss={() => {}}>
+          <Text as="p">Concurrent ajouté avec succès et surveillance activée.</Text>
+        </Banner>
+      )}
+      {alreadyExists && (
+        <Banner tone="warning" onDismiss={() => {}}>
+          <Text as="p">Ce concurrent est déjà surveillé.</Text>
+        </Banner>
+      )}
+      {error && (
+        <Banner tone="critical" onDismiss={() => {}}>
+          <Text as="p">{error}</Text>
+        </Banner>
+      )}
+      <InlineGrid columns={2} gap="200">
+        <input
+          name="myProductTitle" placeholder="Nom de votre produit" style={inputStyle}
+          value={myProductTitle} onChange={(e) => setMyProductTitle(e.target.value)}
+        />
+        <input
+          name="myCurrentPrice" type="number" step="0.01" placeholder="Votre prix (optionnel)" style={inputStyle}
+          value={myCurrentPrice} onChange={(e) => setMyCurrentPrice(e.target.value)}
+        />
+        <input
+          name="competitorName" placeholder="Nom du concurrent" style={inputStyle}
+          value={competitorName} onChange={(e) => setCompetitorName(e.target.value)}
+        />
+        <input
+          name="competitorUrl" type="url" placeholder="https://boutique-concurrente.com/produit" style={inputStyle}
+          value={competitorUrl} onChange={(e) => setCompetitorUrl(e.target.value)}
+        />
+      </InlineGrid>
+      <Button onClick={handleSubmit} variant="primary" loading={isSubmitting}>
+        {isSubmitting ? "Ajout en cours..." : "Ajouter et surveiller"}
+      </Button>
+    </BlockStack>
   );
 }
 
