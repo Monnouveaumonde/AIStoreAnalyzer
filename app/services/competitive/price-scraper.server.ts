@@ -171,13 +171,47 @@ export async function scrapeProductPrice(url: string, preloadedHtml?: string | n
               }
             }
 
-            if (result.price) break;
+            if (result.price) { console.log(`[scrape] JSON-LD: prix=${result.price}`); break; }
           }
         }
         if (result.price) break;
       } catch {
         // JSON mal formé — on continue avec la couche suivante
       }
+    }
+    if (!result.price) console.log(`[scrape] JSON-LD: aucun prix trouvé`);
+
+    // ── Couche 1b : Shopify product JSON endpoint ────────────────────────
+    if (!result.price) {
+      try {
+        const u = new URL(url);
+        const jsonUrl = url.endsWith(".json") ? url : `${u.origin}${u.pathname.replace(/\/$/, "")}.json`;
+        if (u.pathname !== "/" && !u.pathname.endsWith(".json")) {
+          const jsonResp = await fetch(jsonUrl, { headers: buildHeaders(url), signal: AbortSignal.timeout(6000) }).catch(() => null);
+          if (jsonResp?.ok) {
+            const jd = await jsonResp.json().catch(() => null);
+            const product = jd?.product;
+            if (product?.variants?.length) {
+              const variant = product.variants[0];
+              const price = parseFloat(variant.price);
+              if (price > 0) {
+                result.price = price;
+                result.title = product.title ?? result.title;
+                result.currency = "EUR";
+                console.log(`[scrape] Prix Shopify JSON: ${price}`);
+              }
+              if (variant.compare_at_price) {
+                const orig = parseFloat(variant.compare_at_price);
+                if (orig > price) {
+                  result.originalPrice = orig;
+                  result.hasPromotion = true;
+                  result.promotionLabel = `-${Math.round(((orig - price) / orig) * 100)}%`;
+                }
+              }
+            }
+          }
+        }
+      } catch {}
     }
 
     // ── Couche 2 : Balises meta Shopify / OG ───────────────────────────────
@@ -267,7 +301,10 @@ export async function scrapeProductPrice(url: string, preloadedHtml?: string | n
     }
 
     if (!result.price) {
-      result.error = "Prix non détecté — vérifiez l'URL";
+      result.error = "Prix non détecté — vérifiez que l'URL pointe vers une page produit";
+      console.log(`[scrape] Prix non trouvé pour ${url}`);
+    } else {
+      console.log(`[scrape] Prix trouvé: ${result.price} ${result.currency} pour ${url}`);
     }
   } catch (err: any) {
     result.error = err.message ?? "Erreur de connexion";
