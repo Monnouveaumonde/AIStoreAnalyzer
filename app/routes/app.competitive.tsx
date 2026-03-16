@@ -1669,7 +1669,7 @@ export default function CompetitiveDashboard() {
                 >
                   Tout marquer comme lu
                 </Button>
-                <Button onClick={() => navigate("/app/competitive/alerts")}>
+                <Button url="/app/competitive/alerts">
                   Voir les alertes
                 </Button>
               </InlineStack>
@@ -1769,7 +1769,7 @@ export default function CompetitiveDashboard() {
                     {recentAlerts.length > 5 && (
                       <Button
                         variant="plain"
-                        onClick={() => navigate("/app/competitive/alerts")}
+                        url="/app/competitive/alerts"
                       >
                         Voir toutes les alertes →
                       </Button>
