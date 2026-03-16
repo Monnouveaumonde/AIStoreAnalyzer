@@ -217,9 +217,12 @@ async function checkSingleProduct(
   if (oldPrice === null) return false;
 
   const priceDiff = newPrice - oldPrice;
-  const priceDiffPercent = (priceDiff / oldPrice) * 100;
+  const priceDiffPercent = oldPrice > 0 ? (priceDiff / oldPrice) * 100 : 0;
 
-  // Seuil de déclenchement : changement > 1% (évite le bruit sur les centimes)
+  // Pas d'alerte si le prix n'a pas changé
+  if (priceDiff === 0) return false;
+
+  // Seuil de déclenchement : changement > threshold% (évite le bruit sur les centimes)
   const threshold = watchedProduct.automationThresholdPct ?? 1;
   if (Math.abs(priceDiffPercent) < threshold && !scraped.hasPromotion) return false;
   if (watchedProduct.automationAlerts === false) return false;
@@ -229,10 +232,10 @@ async function checkSingleProduct(
   let title: string;
   let message: string;
 
-  if (scraped.hasPromotion && !watchedProduct.lastPrice) {
+  if (scraped.hasPromotion && scraped.originalPrice && scraped.originalPrice > newPrice) {
     alertType = "PROMOTION_STARTED";
     title = `Promo chez ${watchedProduct.competitorName}`;
-    message = `${watchedProduct.competitorName} a lancé une promotion sur "${watchedProduct.shopifyProductTitle}" : ${scraped.promotionLabel ?? "Promotion détectée"}. Nouveau prix : ${newPrice}${scraped.currency}.`;
+    message = `${watchedProduct.competitorName} a lancé une promotion sur "${watchedProduct.shopifyProductTitle}" : ${scraped.promotionLabel ?? "Promotion détectée"}. Nouveau prix : ${newPrice} ${scraped.currency} (ancien : ${scraped.originalPrice} ${scraped.currency}).`;
   } else if (priceDiff < 0) {
     alertType = "PRICE_DROP";
     const pct = Math.abs(priceDiffPercent).toFixed(1);
