@@ -168,8 +168,13 @@ async function applySeoMutation(
     return false;
   }
 
-  const success = !!result?.[resourceType];
-  console.log(`[seo-optimizer] Mutation ${resourceType}: ${success ? "OK" : "ECHEC"}`);
+  const resource = result?.[resourceType];
+  const success = !!resource;
+  if (success) {
+    console.log(`[seo-optimizer] Mutation ${resourceType}: OK → seo=${JSON.stringify(resource?.seo)}`);
+  } else {
+    console.log(`[seo-optimizer] Mutation ${resourceType}: ECHEC`);
+  }
   return success;
 }
 

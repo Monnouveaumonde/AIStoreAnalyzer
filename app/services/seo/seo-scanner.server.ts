@@ -134,11 +134,16 @@ async function scanProducts(admin: AdminApiContext) {
   const products = data.data?.products?.edges?.map((e: any) => e.node) ?? [];
 
   const issues: RawSeoIssue[] = [];
-  const metaTitles: Map<string, string> = new Map();    // title -> resourceId
+  const metaTitles: Map<string, string> = new Map();
   const metaDescriptions: Map<string, string> = new Map();
   const metaStats = { total: products.length, missingTitle: 0, missingDesc: 0, shortTitle: 0, longTitle: 0, shortDesc: 0, longDesc: 0 };
   const headingStats = { missingH1: 0, multipleH1: 0 };
   const altStats = { total: 0, missing: 0 };
+
+  console.log(`[seo-scan] ${products.length} produits trouvés`);
+  for (const p of products.slice(0, 3)) {
+    console.log(`[seo-scan] Produit "${p.title}" → seo.title="${p.seo?.title ?? ""}" seo.description="${(p.seo?.description ?? "").substring(0, 40)}"`);
+  }
 
   for (const product of products) {
     const seoTitle = product.seo?.title ?? "";
