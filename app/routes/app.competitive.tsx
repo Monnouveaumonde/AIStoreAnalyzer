@@ -64,7 +64,6 @@ async function findProductOnSite(origin: string, productName: string): Promise<s
         if (match?.handle) return `${origin}/products/${match.handle}`;
         // Pas de match exact, prendre le premier produit comme fallback
         if (data.products[0]?.handle) {
-          console.log(`[findProduct] Pas de match exact, premier produit: ${data.products[0].title}`);
         }
       }
     }
@@ -330,8 +329,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const rawCompetitorName = (formData.get("competitorName") as string | null)?.trim() ?? "";
     const competitorName = rawCompetitorName || urlObj.hostname.replace(/^www\./, "").split(".")[0];
 
-    console.log(`[add_watch] Ajout manuel: title="${myProductTitle}" competitor="${competitorName}" url="${competitorUrl}" price="${myCurrentPriceRaw}"`);
-
     const check = await canAddWatchedProduct(shopDomain);
     if (!check.allowed) {
       return json({ success: false, error: check.reason ?? "Limite atteinte." }, { status: 403 });
@@ -353,13 +350,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let finalUrl = competitorUrl;
     const isHomepage = urlObj.pathname === "/" || urlObj.pathname === "";
     if (isHomepage && myProductTitle) {
-      console.log(`[add_watch] URL = page d'accueil, recherche du produit "${myProductTitle}" sur ${urlObj.origin}`);
       const foundProductUrl = await findProductOnSite(urlObj.origin, myProductTitle);
       if (foundProductUrl) {
         finalUrl = foundProductUrl;
-        console.log(`[add_watch] Produit trouvé: ${finalUrl}`);
-      } else {
-        console.log(`[add_watch] Produit non trouvé via API, on garde l'URL d'accueil`);
       }
     }
 
@@ -583,7 +576,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-      console.log(`[analyze] Lancement analyse pour ${watchedProduct.competitorUrl}`);
       const analysis = await analyzeCompetitivePage({
         competitorUrl: watchedProduct.competitorUrl,
         own: {
@@ -591,7 +583,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           price: watchedProduct.myCurrentPrice,
         },
       });
-      console.log(`[analyze] Résultat: prix=${analysis.price}, strengths=${analysis.strengths.length}, diagnostic=${analysis.diagnostic}`);
       return json({ success: true, analysis, watchedProductId });
     } catch (err) {
       console.error(`[analyze] ERREUR:`, err);

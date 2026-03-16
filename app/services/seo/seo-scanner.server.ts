@@ -140,11 +140,6 @@ async function scanProducts(admin: AdminApiContext) {
   const headingStats = { missingH1: 0, multipleH1: 0 };
   const altStats = { total: 0, missing: 0 };
 
-  console.log(`[seo-scan] ${products.length} produits trouvés`);
-  for (const p of products.slice(0, 3)) {
-    console.log(`[seo-scan] Produit "${p.title}" → seo.title="${p.seo?.title ?? ""}" seo.description="${(p.seo?.description ?? "").substring(0, 40)}"`);
-  }
-
   for (const product of products) {
     const seoTitle = product.seo?.title ?? "";
     const seoDesc = product.seo?.description ?? "";

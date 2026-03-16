@@ -67,11 +67,8 @@ export async function analyzeCompetitivePage(input: {
   competitorUrl: string;
   own?: OwnProductSignals;
 }): Promise<CompetitiveAnalysis> {
-  console.log(`[competitive-analysis] Analyse de ${input.competitorUrl}`);
   const html = await fetchHtmlOnce(input.competitorUrl);
-  console.log(`[competitive-analysis] HTML reçu: ${html ? `${html.length} chars` : "null (échec fetch)"}`);
   const scraped = await scrapeProductPrice(input.competitorUrl, html);
-  console.log(`[competitive-analysis] Prix scraped: ${scraped.price ?? "non détecté"} ${scraped.currency}, titre: ${scraped.title}, erreur: ${scraped.error}`);
 
   const normalizedHtml = (html ?? "").replace(/&nbsp;|&#160;/gi, " ");
   const plain = stripTags(normalizedHtml).toLowerCase();

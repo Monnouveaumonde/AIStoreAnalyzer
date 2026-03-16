@@ -209,7 +209,7 @@ export async function hasFeatureAccess(
     if (!isPaidPlan) {
       return {
         allowed: false,
-        reason: "Module reserve aux plans payants (Pro ou Growth).",
+        reason: "Module réservé aux plans payants (Pro ou Growth).",
       };
     }
     return { allowed: true };

@@ -166,7 +166,6 @@ async function applySeoMutation(
     return false;
   }
 
-  console.log(`[seo-optimizer] Mutation ${resourceType} pour ${resourceId}`, JSON.stringify(seoInput));
   const response = await admin.graphql(mutation, { variables });
   const data = await response.json();
 
@@ -184,11 +183,7 @@ async function applySeoMutation(
 
   const resource = result?.[resourceType];
   const success = !!resource;
-  if (success) {
-    console.log(`[seo-optimizer] Mutation ${resourceType}: OK → seo=${JSON.stringify(resource?.seo)}`);
-  } else {
-    console.log(`[seo-optimizer] Mutation ${resourceType}: ECHEC`);
-  }
+  
   return success;
 }
 

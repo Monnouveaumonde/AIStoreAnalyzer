@@ -86,21 +86,14 @@ function buildHeaders(url: string): Record<string, string> {
 
 export async function fetchHtmlOnce(url: string, timeoutMs = 12000): Promise<string | null> {
   try {
-    console.log(`[fetch] GET ${url} (timeout=${timeoutMs}ms)`);
     const resp = await fetch(url, {
       headers: buildHeaders(url),
       redirect: "follow",
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!resp.ok) {
-      console.log(`[fetch] ${url} -> HTTP ${resp.status}`);
-      return null;
-    }
-    const text = await resp.text();
-    console.log(`[fetch] ${url} -> OK (${text.length} chars)`);
-    return text;
-  } catch (err: any) {
-    console.log(`[fetch] ${url} -> ERREUR: ${err?.message ?? err}`);
+    if (!resp.ok) return null;
+    return await resp.text();
+  } catch {
     return null;
   }
 }
