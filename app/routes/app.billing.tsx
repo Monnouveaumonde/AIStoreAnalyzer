@@ -223,13 +223,31 @@ export default function BillingPage() {
               )}
             </InlineStack>
             <Text as="p" tone="subdued">
-              Débloque l'automatisation avancée concurrentielle: vérif auto par ligne,
-              seuil de déclenchement, alertes automatiques et recommandations pricing.
+              L'IA applique automatiquement les corrections et optimisations sur votre boutique Shopify.
+              Requiert un plan PRO ou GROWTH.
             </Text>
+            <Box padding="200" background="bg-surface-secondary" borderRadius="100">
+              <BlockStack gap="100">
+                <Text variant="bodySm" as="p" fontWeight="semibold">Ce que l'IA fait pour vous :</Text>
+                <List>
+                  <List.Item>Génère et applique des descriptions produits optimisées</List.Item>
+                  <List.Item>Corrige automatiquement le SEO (meta titles, descriptions, alt text)</List.Item>
+                  <List.Item>Ajoute les prix barrés pour l'ancrage psychologique</List.Item>
+                  <List.Item>Crée les pages manquantes (FAQ, À propos, Confiance)</List.Item>
+                  <List.Item>Automatisation concurrentielle avancée (seuils, alertes, pricing)</List.Item>
+                </List>
+              </BlockStack>
+            </Box>
+            {currentPlan === "FREE" && (
+              <Banner tone="warning">
+                <Text as="p">Passez d'abord au plan PRO ou GROWTH pour activer Automation+.</Text>
+              </Banner>
+            )}
             <Button
               variant={automationAddonActive ? "secondary" : "primary"}
               onClick={handleToggleAddon}
               disabled={currentPlan === "FREE"}
+              fullWidth
             >
               {currentPlan === "FREE"
                 ? "Disponible sur PRO/GROWTH"

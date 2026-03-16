@@ -10,6 +10,7 @@ export const PLANS = {
       "3 analyses par mois",
       "Score global de la boutique",
       "Recommandations de base",
+      "Boutons \"Faire moi-même\" sur chaque conseil",
     ],
   },
   PRO: {
@@ -20,23 +21,29 @@ export const PLANS = {
       "20 analyses par mois",
       "Rapport détaillé complet",
       "Coaching IA personnalisé",
+      "SEO Optimizer (scan + correction auto)",
+      "Veille concurrentielle (prix, alertes)",
       "Export PDF",
       "Rapport viral partageable",
+      "Compatible Automation+ (+5$/mois)",
     ],
   },
   GROWTH: {
     name: "Growth",
     price: 49,
-    analysisLimit: -1, // illimité
+    analysisLimit: -1,
     features: [
       "Analyses illimitées",
       "Rapport détaillé complet",
       "Coaching IA avancé",
+      "SEO Optimizer (scan + correction auto)",
+      "Veille concurrentielle illimitée",
       "Export PDF",
       "Rapport viral partageable",
       "Benchmarking sectoriel",
       "Alertes automatiques",
       "Support prioritaire",
+      "Compatible Automation+ (+5$/mois)",
     ],
   },
 } as const;
