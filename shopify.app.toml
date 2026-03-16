@@ -9,7 +9,7 @@ application_url = "https://aistoreanalyzer-production.up.railway.app"
 embedded = true
 
 [access_scopes]
-scopes = "read_content,read_discounts,read_orders,read_price_rules,read_products,read_themes"
+scopes = "read_content,write_content,read_discounts,read_orders,read_price_rules,read_products,write_products,read_themes"
 use_legacy_install_flow = false
 
 [auth]
