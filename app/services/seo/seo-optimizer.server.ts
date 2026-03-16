@@ -86,7 +86,34 @@ export async function applyOptimization(
 }
 
 /**
+ * Lit les valeurs SEO actuelles d'une ressource Shopify pour ne pas les écraser.
+ */
+async function fetchCurrentSeo(
+  admin: AdminApiContext,
+  resourceType: string,
+  resourceId: string,
+): Promise<{ title: string; description: string }> {
+  const queryMap: Record<string, string> = {
+    product: `query($id: ID!) { product(id: $id) { seo { title description } } }`,
+    collection: `query($id: ID!) { collection(id: $id) { seo { title description } } }`,
+    page: `query($id: ID!) { page(id: $id) { seo { title description } } }`,
+  };
+  const query = queryMap[resourceType];
+  if (!query) return { title: "", description: "" };
+
+  try {
+    const resp = await admin.graphql(query, { variables: { id: resourceId } });
+    const data = await resp.json();
+    const seo = data.data?.[resourceType]?.seo;
+    return { title: seo?.title ?? "", description: seo?.description ?? "" };
+  } catch {
+    return { title: "", description: "" };
+  }
+}
+
+/**
  * Mutation GraphQL pour mettre à jour le SEO d'un produit, page ou collection.
+ * Lit d'abord les valeurs actuelles pour ne jamais écraser un champ non modifié.
  */
 async function applySeoMutation(
   admin: AdminApiContext,
@@ -94,13 +121,16 @@ async function applySeoMutation(
   resourceId: string,
   seo: { metaTitle?: string; metaDescription?: string }
 ): Promise<boolean> {
-  // Détermine la bonne mutation selon le type de ressource
+  // Lire les valeurs SEO actuelles pour préserver les champs non modifiés
+  const current = await fetchCurrentSeo(admin, resourceType, resourceId);
+
+  const seoInput: Record<string, string> = {
+    title: seo.metaTitle ?? current.title,
+    description: seo.metaDescription ?? current.description,
+  };
+
   let mutation: string;
   let variables: Record<string, unknown>;
-
-  const seoInput: Record<string, string> = {};
-  if (seo.metaTitle !== undefined) seoInput.title = seo.metaTitle;
-  if (seo.metaDescription !== undefined) seoInput.description = seo.metaDescription;
 
   if (resourceType === "product") {
     mutation = `
@@ -111,12 +141,7 @@ async function applySeoMutation(
         }
       }
     `;
-    variables = {
-      input: {
-        id: resourceId,
-        seo: seoInput,
-      },
-    };
+    variables = { input: { id: resourceId, seo: seoInput } };
   } else if (resourceType === "page") {
     mutation = `
       mutation UpdatePageSeo($id: ID!, $page: PageUpdateInput!) {
@@ -126,12 +151,7 @@ async function applySeoMutation(
         }
       }
     `;
-    variables = {
-      id: resourceId,
-      page: {
-        seo: seoInput,
-      },
-    };
+    variables = { id: resourceId, page: { seo: seoInput } };
   } else if (resourceType === "collection") {
     mutation = `
       mutation UpdateCollectionSeo($input: CollectionInput!) {
@@ -141,14 +161,8 @@ async function applySeoMutation(
         }
       }
     `;
-    variables = {
-      input: {
-        id: resourceId,
-        seo: seoInput,
-      },
-    };
+    variables = { input: { id: resourceId, seo: seoInput } };
   } else {
-    console.log(`[seo-optimizer] Type de ressource non supporté: ${resourceType}`);
     return false;
   }
 
