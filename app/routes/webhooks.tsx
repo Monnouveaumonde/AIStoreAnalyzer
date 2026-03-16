@@ -44,6 +44,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       break;
 
+    case "APP_SUBSCRIPTIONS_UPDATE": {
+      const subscriptionPayload = payload as any;
+      const status = subscriptionPayload?.app_subscription?.status;
+
+      if (status === "CANCELLED" || status === "EXPIRED" || status === "FROZEN") {
+        const shopRecord = await prisma.shop.findUnique({
+          where: { shopDomain: shop },
+        });
+        if (shopRecord) {
+          await prisma.shop.update({
+            where: { shopDomain: shop },
+            data: { plan: "FREE" },
+          });
+          await prisma.subscription.updateMany({
+            where: { shopId: shopRecord.id },
+            data: {
+              plan: "FREE",
+              status: status === "CANCELLED" ? "CANCELLED" : status === "FROZEN" ? "FROZEN" : "EXPIRED",
+              automationAddonActive: false,
+            },
+          });
+        }
+      }
+      break;
+    }
+
     default:
       throw new Response("Unhandled webhook topic", { status: 404 });
   }

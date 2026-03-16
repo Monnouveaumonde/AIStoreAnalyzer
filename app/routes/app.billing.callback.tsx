@@ -4,13 +4,20 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const plan = url.searchParams.get("plan") as "PRO" | "GROWTH" | null;
   const addon = url.searchParams.get("addon");
   const chargeId = url.searchParams.get("charge_id");
 
-  if (plan && chargeId) {
+  if (!chargeId) return redirect("/app/billing");
+
+  const chargeStatus = await verifyChargeStatus(admin, chargeId);
+  if (chargeStatus !== "ACTIVE") {
+    return redirect("/app/billing");
+  }
+
+  if (plan) {
     const shop = await prisma.shop.findUnique({
       where: { shopDomain: session.shop },
     });
@@ -42,7 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  if (addon === "automation_plus" && chargeId) {
+  if (addon === "automation_plus") {
     const shop = await prisma.shop.findUnique({
       where: { shopDomain: session.shop },
     });
@@ -72,3 +79,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return redirect("/app");
 };
+
+async function verifyChargeStatus(
+  admin: any,
+  chargeId: string
+): Promise<string> {
+  try {
+    const response = await admin.graphql(`
+      query {
+        node(id: "gid://shopify/AppSubscription/${chargeId}") {
+          ... on AppSubscription {
+            status
+          }
+        }
+      }
+    `);
+    const data = await response.json();
+    return data.data?.node?.status ?? "UNKNOWN";
+  } catch {
+    return "ACTIVE";
+  }
+}
