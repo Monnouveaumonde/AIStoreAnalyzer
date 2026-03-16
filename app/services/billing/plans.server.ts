@@ -87,8 +87,8 @@ export async function createSubscription(
           },
         },
       ],
-      returnUrl: `${process.env.APP_URL}/app/billing/callback?plan=${plan}&shop=${shopDomain}`,
-      test: process.env.NODE_ENV !== "production",
+      returnUrl: `${process.env.SHOPIFY_APP_URL || process.env.APP_URL}/app/billing/callback?plan=${plan}&shop=${shopDomain}`,
+      test: true,
     },
   });
 
@@ -135,8 +135,8 @@ export async function createAutomationAddonSubscription(
             },
           },
         ],
-        returnUrl: `${process.env.APP_URL}/app/billing/callback?addon=automation_plus&shop=${shopDomain}`,
-        test: process.env.NODE_ENV !== "production",
+        returnUrl: `${process.env.SHOPIFY_APP_URL || process.env.APP_URL}/app/billing/callback?addon=automation_plus&shop=${shopDomain}`,
+        test: true,
       },
     }
   );
