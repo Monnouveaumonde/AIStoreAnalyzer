@@ -37,9 +37,67 @@ import {
   canAddWatchedProduct,
 } from "../services/competitive/watcher.server";
 import { hasFeatureAccess } from "../services/billing/plans.server";
-import { scrapeProductPrice } from "../services/competitive/price-scraper.server";
+import { scrapeProductPrice, fetchHtmlOnce } from "../services/competitive/price-scraper.server";
 import { discoverCompetitors } from "../services/competitive/discovery.server";
 import { analyzeCompetitivePage } from "../services/competitive/competitive-analysis.server";
+
+/**
+ * Tente de trouver un produit par nom sur un site concurrent (Shopify ou autre).
+ * Essaie : /products.json, /search/suggest.json, puis /search?q=
+ */
+async function findProductOnSite(origin: string, productName: string): Promise<string | null> {
+  const query = encodeURIComponent(productName);
+
+  // Méthode 1 : Shopify products.json (public)
+  try {
+    const resp = await fetch(`${origin}/products.json?limit=20`, {
+      signal: AbortSignal.timeout(6000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36" },
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data?.products?.length) {
+        const nameLC = productName.toLowerCase();
+        const match = data.products.find((p: any) =>
+          p.title?.toLowerCase().includes(nameLC) || nameLC.includes(p.title?.toLowerCase())
+        );
+        if (match?.handle) return `${origin}/products/${match.handle}`;
+        // Pas de match exact, prendre le premier produit comme fallback
+        if (data.products[0]?.handle) {
+          console.log(`[findProduct] Pas de match exact, premier produit: ${data.products[0].title}`);
+        }
+      }
+    }
+  } catch {}
+
+  // Méthode 2 : Shopify search suggest
+  try {
+    const resp = await fetch(`${origin}/search/suggest.json?q=${query}&resources[type]=product&resources[limit]=5`, {
+      signal: AbortSignal.timeout(6000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36" },
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const products = data?.resources?.results?.products;
+      if (products?.length) {
+        return `${origin}${products[0].url}`;
+      }
+    }
+  } catch {}
+
+  // Méthode 3 : Recherche HTML /search?q=... et extraction du premier lien /products/
+  try {
+    const html = await fetchHtmlOnce(`${origin}/search?q=${query}&type=product`, 8000);
+    if (html) {
+      const productLinkMatch = html.match(/href=["'](\/products\/[a-z0-9-]+)["']/i);
+      if (productLinkMatch) {
+        return `${origin}${productLinkMatch[1]}`;
+      }
+    }
+  } catch {}
+
+  return null;
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -291,10 +349,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: true, alreadyExists: true });
     }
 
+    // Si c'est une page d'accueil, tenter de trouver la page produit
+    let finalUrl = competitorUrl;
+    const isHomepage = urlObj.pathname === "/" || urlObj.pathname === "";
+    if (isHomepage && myProductTitle) {
+      console.log(`[add_watch] URL = page d'accueil, recherche du produit "${myProductTitle}" sur ${urlObj.origin}`);
+      const foundProductUrl = await findProductOnSite(urlObj.origin, myProductTitle);
+      if (foundProductUrl) {
+        finalUrl = foundProductUrl;
+        console.log(`[add_watch] Produit trouvé: ${finalUrl}`);
+      } else {
+        console.log(`[add_watch] Produit non trouvé via API, on garde l'URL d'accueil`);
+      }
+    }
+
     let initialPrice: number | null = null;
+    let scrapedTitle: string | null = null;
     try {
-      const scraped = await scrapeProductPrice(competitorUrl);
+      const scraped = await scrapeProductPrice(finalUrl);
       if (scraped.price) initialPrice = scraped.price;
+      if (scraped.title) scrapedTitle = scraped.title;
     } catch {
       // non bloquant
     }
@@ -304,7 +378,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shopId: shop.id,
         shopifyProductId: `manual:${Date.now()}`,
         shopifyProductTitle: myProductTitle,
-        competitorUrl,
+        competitorUrl: finalUrl,
         competitorName,
         competitorDomain: urlObj.hostname,
         myCurrentPrice: typeof myCurrentPrice === "number" && !Number.isNaN(myCurrentPrice) ? myCurrentPrice : null,
@@ -323,8 +397,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
-    console.log(`[add_watch] OK: ${watched.id} — ${competitorName} (${competitorUrl}) prix=${initialPrice}`);
-    return json({ success: true, added: true });
+    console.log(`[add_watch] OK: ${watched.id} — ${competitorName} (${finalUrl}) prix=${initialPrice} titre="${scrapedTitle}"`);
+    return json({
+      success: true,
+      added: true,
+      detectedPrice: initialPrice,
+      detectedTitle: scrapedTitle,
+      resolvedUrl: finalUrl !== competitorUrl ? finalUrl : null,
+      noPrice: !initialPrice,
+    });
   }
 
   if (intent === "auto_watch_from_shopify") {
@@ -1356,21 +1437,26 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
   const [competitorUrl, setCompetitorUrl] = useState("");
 
   const isSubmitting = fetcher.state !== "idle";
-  const success = fetcher.data?.success && !fetcher.data?.alreadyExists;
-  const alreadyExists = fetcher.data?.alreadyExists;
-  const error = fetcher.data?.error;
+  const data = fetcher.data;
+  const success = data?.success && !data?.alreadyExists;
+  const alreadyExists = data?.alreadyExists;
+  const error = data?.error;
+
+  const isUrlHomepage = (() => {
+    try { return new URL(competitorUrl).pathname === "/" || new URL(competitorUrl).pathname === ""; } catch { return false; }
+  })();
 
   const handleSubmit = () => {
     if (!myProductTitle || !competitorUrl) return;
-    const data: Record<string, string> = {
+    const formData: Record<string, string> = {
       intent: "add_watch_manual",
       shopDomain,
       myProductTitle,
       competitorUrl,
     };
-    if (competitorName) data.competitorName = competitorName;
-    if (myCurrentPrice) data.myCurrentPrice = myCurrentPrice;
-    fetcher.submit(data, { method: "post", action: contextualAction });
+    if (competitorName) formData.competitorName = competitorName;
+    if (myCurrentPrice) formData.myCurrentPrice = myCurrentPrice;
+    fetcher.submit(formData, { method: "post", action: contextualAction });
   };
 
   useEffect(() => {
@@ -1390,7 +1476,13 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
     <BlockStack gap="200">
       {success && (
         <Banner tone="success" onDismiss={() => {}}>
-          <Text as="p">Concurrent ajouté avec succès et surveillance activée.</Text>
+          <BlockStack gap="100">
+            <Text as="p" fontWeight="semibold">Concurrent ajouté avec succès !</Text>
+            {data?.detectedPrice && <Text as="p">Prix détecté : {data.detectedPrice} €</Text>}
+            {data?.detectedTitle && <Text as="p">Produit trouvé : {data.detectedTitle}</Text>}
+            {data?.resolvedUrl && <Text as="p">URL produit résolue : {data.resolvedUrl}</Text>}
+            {data?.noPrice && <Text as="p" tone="caution">Prix non détecté — il sera récupéré lors de la prochaine vérification ou ajoutez l'URL directe du produit.</Text>}
+          </BlockStack>
         </Banner>
       )}
       {alreadyExists && (
@@ -1403,9 +1495,27 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
           <Text as="p">{error}</Text>
         </Banner>
       )}
+
+      <Banner tone="info">
+        <Text as="p">
+          Pour un suivi des prix optimal, utilisez l'URL directe d'un produit concurrent
+          (ex: https://boutique.com/products/nom-du-produit).
+          Si vous collez l'URL de la boutique, nous essaierons de trouver le produit automatiquement.
+        </Text>
+      </Banner>
+
+      {competitorUrl && isUrlHomepage && myProductTitle && (
+        <Banner tone="warning">
+          <Text as="p">
+            L'URL semble être une page d'accueil. Nous allons rechercher "{myProductTitle}" sur ce site automatiquement.
+            Pour de meilleurs résultats, collez directement l'URL de la page produit.
+          </Text>
+        </Banner>
+      )}
+
       <InlineGrid columns={2} gap="200">
         <input
-          name="myProductTitle" placeholder="Nom de votre produit" style={inputStyle}
+          name="myProductTitle" placeholder="Nom de votre produit *" style={inputStyle}
           value={myProductTitle} onChange={(e) => setMyProductTitle(e.target.value)}
         />
         <input
@@ -1413,7 +1523,7 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
           value={myCurrentPrice} onChange={(e) => setMyCurrentPrice(e.target.value)}
         />
         <input
-          name="competitorUrl" type="url" placeholder="https://boutique-concurrente.com/produit *" style={inputStyle}
+          name="competitorUrl" type="url" placeholder="URL du produit concurrent ou de la boutique *" style={inputStyle}
           value={competitorUrl} onChange={(e) => setCompetitorUrl(e.target.value)}
         />
         <input
