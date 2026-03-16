@@ -117,44 +117,71 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let failed = 0;
     let skipped = 0;
 
-    console.log(`[auto-fix] Application: ${fixableIssues.length} issues, ${suggestionsMap.size} suggestions`);
-
-    for (const issue of fixableIssues) {
+    const prepared = fixableIssues.map((issue) => {
       const fieldName =
         issue.issueType.includes("META_TITLE") ? "metaTitle"
         : issue.issueType.includes("META_DESCRIPTION") ? "metaDescription"
         : issue.issueType === "MISSING_ALT_TEXT" ? "altText"
         : null;
-
       const suggestion = suggestionsMap.get(issue.id);
-      if (!fieldName || !suggestion) { skipped++; continue; }
+      return { issue, fieldName, suggestion };
+    });
 
-      try {
-        console.log(`[auto-fix] Applying ${fieldName} on ${issue.resourceType} ${issue.resourceId}: "${suggestion.substring(0, 50)}..."`);
-        const result = await applyOptimization(admin, {
-          seoScanId: latestScan.id,
-          shopId: shop.id,
-          issueId: issue.id,
-          issueType: issue.issueType,
-          resourceType: issue.resourceType,
-          resourceId: issue.resourceId,
-          resourceTitle: issue.resourceTitle,
-          fieldName,
-          oldValue: issue.currentValue,
-          newValue: suggestion,
-        });
-        if (result.success) {
-          console.log(`[auto-fix] OK: ${issue.resourceTitle}`);
-          fixed++;
-        } else {
-          console.log(`[auto-fix] ECHEC: ${issue.resourceTitle} - ${result.error}`);
-          failed++;
-        }
-      } catch (err: any) {
-        console.log(`[auto-fix] ERREUR: ${issue.resourceTitle} - ${err?.message}`);
-        failed++;
+    const actionable = prepared.filter((p) => p.fieldName && p.suggestion);
+    skipped = prepared.length - actionable.length;
+
+    console.log(`[auto-fix] Application: ${actionable.length} actionable, ${skipped} skipped sur ${prepared.length} total`);
+
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < actionable.length; i += BATCH_SIZE) {
+      const batch = actionable.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(({ issue, fieldName, suggestion }) =>
+          applyOptimization(admin, {
+            seoScanId: latestScan.id,
+            shopId: shop.id,
+            issueId: issue.id,
+            issueType: issue.issueType,
+            resourceType: issue.resourceType,
+            resourceId: issue.resourceId,
+            resourceTitle: issue.resourceTitle,
+            fieldName: fieldName!,
+            oldValue: issue.currentValue,
+            newValue: suggestion!,
+          }).then((r) => {
+            if (r.success) { fixed++; } else { failed++; console.log(`[auto-fix] ECHEC: ${issue.resourceTitle} - ${r.error}`); }
+          })
+        )
+      );
+      for (const r of results) {
+        if (r.status === "rejected") { failed++; console.log(`[auto-fix] ERREUR: ${r.reason}`); }
+      }
+      if (i + BATCH_SIZE < actionable.length) {
+        await new Promise((r) => setTimeout(r, 300));
       }
     }
+
+    console.log(`[auto-fix] Résultat: ${fixed} OK, ${failed} échecs, ${skipped} skipped`);
+
+    const remainingIssues = await prisma.seoIssue.findMany({
+      where: { seoScanId: latestScan.id, isFixed: false },
+    });
+    const newTotal = remainingIssues.length;
+    const newCritical = remainingIssues.filter((i) => i.severity === "CRITICAL" || i.severity === "ERROR").length;
+    const newWarning = remainingIssues.filter((i) => i.severity === "WARNING").length;
+    const allIssuesForScan = await prisma.seoIssue.count({ where: { seoScanId: latestScan.id } });
+    const fixedCount = allIssuesForScan - newTotal;
+    const newScore = allIssuesForScan > 0 ? Math.round((fixedCount / allIssuesForScan) * 100) : 100;
+
+    await prisma.seoScan.update({
+      where: { id: latestScan.id },
+      data: {
+        totalIssues: newTotal,
+        criticalIssues: newCritical,
+        warningIssues: newWarning,
+        overallScore: newScore,
+      },
+    });
 
     const parts = [`${fixed} correction(s) appliquée(s) sur Shopify`];
     if (failed > 0) parts.push(`${failed} échec(s)`);
@@ -287,7 +314,7 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 export default function SeoDashboard() {
-  const { latestScan, totalOptimizations, plan } = useLoaderData<typeof loader>();
+  const { latestScan, totalOptimizations, plan, issueCounts } = useLoaderData<typeof loader>();
   const actionData = useActionData<any>();
   const navigate = useNavigate();
   const submit = useSubmit();
@@ -508,31 +535,11 @@ export default function SeoDashboard() {
                 <BlockStack gap="300">
                   <Text variant="headingMd" as="h3">Répartition des issues</Text>
                   {[
-                    {
-                      label: "Meta titles",
-                      count: latestScan.seoIssues.filter((i: any) => i.issueType.includes("META_TITLE")).length,
-                      color: "critical",
-                    },
-                    {
-                      label: "Meta descriptions",
-                      count: latestScan.seoIssues.filter((i: any) => i.issueType.includes("META_DESCRIPTION")).length,
-                      color: "warning",
-                    },
-                    {
-                      label: "Balises H1/H2",
-                      count: latestScan.seoIssues.filter((i: any) => i.issueType.includes("H1") || i.issueType.includes("H2")).length,
-                      color: "warning",
-                    },
-                    {
-                      label: "Images sans alt",
-                      count: latestScan.seoIssues.filter((i: any) => i.issueType === "MISSING_ALT_TEXT").length,
-                      color: "info",
-                    },
-                    {
-                      label: "Doublons",
-                      count: latestScan.seoIssues.filter((i: any) => i.issueType.includes("DUPLICATE")).length,
-                      color: "critical",
-                    },
+                    { label: "Meta titles", count: issueCounts?.metaTitles ?? 0, color: "critical" },
+                    { label: "Meta descriptions", count: issueCounts?.metaDescriptions ?? 0, color: "warning" },
+                    { label: "Balises H1/H2", count: issueCounts?.headings ?? 0, color: "warning" },
+                    { label: "Images sans alt", count: issueCounts?.altText ?? 0, color: "info" },
+                    { label: "Doublons", count: issueCounts?.duplicates ?? 0, color: "critical" },
                   ].map((cat) => (
                     <InlineStack key={cat.label} align="space-between" blockAlign="center">
                       <Text variant="bodyMd" as="p">{cat.label}</Text>

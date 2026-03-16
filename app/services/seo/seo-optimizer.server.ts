@@ -238,9 +238,25 @@ export async function getSeoScanDashboard(shopDomain: string) {
     }),
   ]);
 
+  let issueCounts = { metaTitles: 0, metaDescriptions: 0, headings: 0, altText: 0, duplicates: 0 };
+  if (latestScan) {
+    const unfixedIssues = await prisma.seoIssue.findMany({
+      where: { seoScanId: latestScan.id, isFixed: false },
+      select: { issueType: true },
+    });
+    issueCounts = {
+      metaTitles: unfixedIssues.filter((i) => i.issueType.includes("META_TITLE")).length,
+      metaDescriptions: unfixedIssues.filter((i) => i.issueType.includes("META_DESCRIPTION")).length,
+      headings: unfixedIssues.filter((i) => i.issueType.includes("H1") || i.issueType.includes("H2")).length,
+      altText: unfixedIssues.filter((i) => i.issueType === "MISSING_ALT_TEXT").length,
+      duplicates: unfixedIssues.filter((i) => i.issueType.includes("DUPLICATE")).length,
+    };
+  }
+
   return {
     latestScan,
     totalOptimizations,
     plan: shop.plan,
+    issueCounts,
   };
 }
