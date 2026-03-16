@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate, useFetcher } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -18,10 +18,13 @@ import {
   Collapsible,
   Toast,
   Frame,
+  Banner,
+  Spinner,
 } from "@shopify/polaris";
 import { useState, useCallback, Fragment } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { hasFeatureAccess } from "../services/billing/plans.server";
 
 /**
  * AiInsightsRenderer
@@ -115,7 +118,7 @@ function renderInline(text: string): React.ReactNode {
 }
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const { id } = params;
 
   const analysis = await prisma.analysis.findUnique({
@@ -134,12 +137,309 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     1
   );
 
+  const automationAccess = await hasFeatureAccess(session.shop, "competitive_automation_plus");
+
   return json({
     analysis,
     totalRevenueImpact: Math.round((totalImpact - 1) * 100),
     appUrl: process.env.SHOPIFY_APP_URL || "",
+    hasAutomation: automationAccess.allowed,
+    shopDomain: session.shop,
   });
 };
+
+// ── Action : IA corrige automatiquement une opportunité ─────────────────────
+export const action = async ({ request, params }: ActionFunctionArgs) => {
+  const { session, admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+
+  if (intent !== "ai_fix_opportunity") {
+    return json({ error: "Action inconnue" }, { status: 400 });
+  }
+
+  const automationAccess = await hasFeatureAccess(session.shop, "competitive_automation_plus");
+  if (!automationAccess.allowed) {
+    return json({ error: automationAccess.reason, needsUpgrade: true }, { status: 403 });
+  }
+
+  const aiActionType = formData.get("aiActionType") as string;
+  const analysisId = params.id;
+
+  try {
+    switch (aiActionType) {
+      case "AI_DESCRIPTIONS": {
+        const productsResp = await admin.graphql(`
+          query {
+            products(first: 50) {
+              edges {
+                node {
+                  id
+                  title
+                  descriptionHtml
+                }
+              }
+            }
+          }
+        `);
+        const productsData = await productsResp.json();
+        const products = productsData.data?.products?.edges?.map((e: any) => e.node) || [];
+        const emptyProducts = products.filter((p: any) => !p.descriptionHtml || p.descriptionHtml.trim().length < 50);
+
+        if (emptyProducts.length === 0) {
+          return json({ success: true, message: "Tous les produits ont déjà une description." });
+        }
+
+        let fixed = 0;
+        let failed = 0;
+        for (const product of emptyProducts.slice(0, 20)) {
+          try {
+            const description = await generateProductDescription(product.title);
+            await admin.graphql(`
+              mutation productUpdate($input: ProductInput!) {
+                productUpdate(input: $input) {
+                  product { id }
+                  userErrors { field message }
+                }
+              }
+            `, { variables: { input: { id: product.id, descriptionHtml: description } } });
+            fixed++;
+            if (fixed % 4 === 0) await new Promise(r => setTimeout(r, 500));
+          } catch {
+            failed++;
+          }
+        }
+        return json({ success: true, message: `${fixed} description(s) générée(s) par IA.${failed > 0 ? ` ${failed} échec(s).` : ""}` });
+      }
+
+      case "AI_SEO_FIX": {
+        return json({ success: true, message: "Redirection vers SEO Optimizer...", redirect: "/app/seo" });
+      }
+
+      case "AI_COMPARE_PRICES": {
+        const productsResp = await admin.graphql(`
+          query {
+            products(first: 50) {
+              edges {
+                node {
+                  id
+                  title
+                  variants(first: 1) {
+                    edges {
+                      node {
+                        id
+                        price
+                        compareAtPrice
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `);
+        const productsData = await productsResp.json();
+        const products = productsData.data?.products?.edges?.map((e: any) => e.node) || [];
+        const needsPricing = products.filter((p: any) => {
+          const v = p.variants?.edges?.[0]?.node;
+          return v && (!v.compareAtPrice || parseFloat(v.compareAtPrice) === 0);
+        });
+
+        if (needsPricing.length === 0) {
+          return json({ success: true, message: "Tous les produits ont déjà un prix barré." });
+        }
+
+        let fixed = 0;
+        let failed = 0;
+        for (const product of needsPricing.slice(0, 30)) {
+          const variant = product.variants?.edges?.[0]?.node;
+          if (!variant) continue;
+          const currentPrice = parseFloat(variant.price);
+          const comparePrice = (currentPrice * 1.15).toFixed(2);
+          try {
+            await admin.graphql(`
+              mutation productVariantUpdate($input: ProductVariantInput!) {
+                productVariantUpdate(input: $input) {
+                  productVariant { id }
+                  userErrors { field message }
+                }
+              }
+            `, { variables: { input: { id: variant.id, compareAtPrice: comparePrice } } });
+            fixed++;
+            if (fixed % 4 === 0) await new Promise(r => setTimeout(r, 500));
+          } catch {
+            failed++;
+          }
+        }
+        return json({ success: true, message: `${fixed} prix barré(s) ajouté(s) (+15%).${failed > 0 ? ` ${failed} échec(s).` : ""}` });
+      }
+
+      case "AI_TRUST_PAGE": {
+        const shopData = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+        const shopName = shopData?.shopName || session.shop.replace(".myshopify.com", "");
+        const trustHtml = buildTrustPageHtml(shopName);
+        const resp = await admin.graphql(`
+          mutation pageCreate($page: PageCreateInput!) {
+            pageCreate(page: $page) {
+              page { id title }
+              userErrors { field message }
+            }
+          }
+        `, { variables: { page: { title: "Confiance & Garanties", body: trustHtml, isPublished: true } } });
+        const result = await resp.json();
+        const errors = result.data?.pageCreate?.userErrors;
+        if (errors?.length > 0) {
+          return json({ error: errors[0].message }, { status: 400 });
+        }
+        return json({ success: true, message: "Page \"Confiance & Garanties\" créée avec succès !" });
+      }
+
+      case "AI_CREATE_PAGES": {
+        const shopData = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+        const shopName = shopData?.shopName || session.shop.replace(".myshopify.com", "");
+        const analysisRecord = await prisma.analysis.findUnique({ where: { id: analysisId }, select: { uxDetails: true } });
+        const uxDetails = analysisRecord?.uxDetails as any;
+
+        const pagesToCreate: { title: string; body: string }[] = [];
+        if (!uxDetails?.hasAboutPage) {
+          pagesToCreate.push({ title: "À propos", body: buildAboutPageHtml(shopName) });
+        }
+        if (!uxDetails?.hasFaqPage) {
+          pagesToCreate.push({ title: "FAQ", body: buildFaqPageHtml(shopName) });
+        }
+
+        if (pagesToCreate.length === 0) {
+          return json({ success: true, message: "Les pages essentielles existent déjà." });
+        }
+
+        let created = 0;
+        let failed = 0;
+        for (const page of pagesToCreate) {
+          try {
+            await admin.graphql(`
+              mutation pageCreate($page: PageCreateInput!) {
+                pageCreate(page: $page) {
+                  page { id }
+                  userErrors { field message }
+                }
+              }
+            `, { variables: { page: { title: page.title, body: page.body, isPublished: true } } });
+            created++;
+          } catch {
+            failed++;
+          }
+        }
+        return json({ success: true, message: `${created} page(s) créée(s) (${pagesToCreate.map(p => p.title).join(", ")}).${failed > 0 ? ` ${failed} échec(s).` : ""}` });
+      }
+
+      default:
+        return json({ error: "Ce type d'action n'est pas automatisable." }, { status: 400 });
+    }
+  } catch (error) {
+    console.error("[ai_fix_opportunity] Error:", error);
+    return json({ error: "Une erreur est survenue pendant l'exécution de l'IA." }, { status: 500 });
+  }
+};
+
+async function generateProductDescription(productTitle: string): Promise<string> {
+  const prompt = `Génère une description produit e-commerce en HTML pour "${productTitle}".
+La description doit :
+- Faire 150-300 mots
+- Inclure les bénéfices clients
+- Utiliser des balises <p>, <ul>, <li> pour la structure
+- Être persuasive et orientée conversion
+- Être en français
+Retourne UNIQUEMENT le HTML, sans explication.`;
+
+  try {
+    const provider = process.env.AI_PROVIDER ?? "openai";
+    if (provider === "anthropic" && process.env.ANTHROPIC_API_KEY) {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({ model: "claude-3-5-sonnet-20241022", max_tokens: 600, messages: [{ role: "user", content: prompt }] }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await resp.json();
+      return data.content?.[0]?.text ?? buildFallbackDescription(productTitle);
+    }
+
+    if (process.env.OPENAI_API_KEY) {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "Tu es un copywriter e-commerce expert. Tu génères des descriptions produits persuasives en HTML." },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: 600,
+          temperature: 0.6,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content ?? buildFallbackDescription(productTitle);
+    }
+  } catch {
+    // fallback
+  }
+  return buildFallbackDescription(productTitle);
+}
+
+function buildFallbackDescription(title: string): string {
+  return `<p>Découvrez <strong>${title}</strong>, un produit de qualité conçu pour répondre à vos besoins.</p>
+<ul>
+<li>Qualité premium garantie</li>
+<li>Livraison rapide et soignée</li>
+<li>Satisfaction client assurée</li>
+</ul>
+<p>Commandez dès maintenant et profitez d'une expérience d'achat exceptionnelle.</p>`;
+}
+
+function buildTrustPageHtml(shopName: string): string {
+  return `<h2>Pourquoi faire confiance à ${shopName} ?</h2>
+<h3>Paiement 100% sécurisé</h3>
+<p>Toutes vos transactions sont protégées par un cryptage SSL de niveau bancaire. Nous acceptons les principales cartes de crédit et PayPal.</p>
+<h3>Livraison fiable</h3>
+<p>Nous expédions vos commandes avec soin et vous fournissons un numéro de suivi pour chaque envoi.</p>
+<h3>Garantie satisfaction</h3>
+<p>Votre satisfaction est notre priorité. Si un produit ne vous convient pas, contactez-nous pour trouver une solution.</p>
+<h3>Service client réactif</h3>
+<p>Notre équipe est disponible pour répondre à toutes vos questions. N'hésitez pas à nous contacter.</p>`;
+}
+
+function buildAboutPageHtml(shopName: string): string {
+  return `<h2>À propos de ${shopName}</h2>
+<p>Bienvenue chez ${shopName} ! Nous sommes passionnés par la qualité et le service client.</p>
+<p>Notre mission est de vous proposer des produits soigneusement sélectionnés, au meilleur rapport qualité-prix.</p>
+<h3>Nos valeurs</h3>
+<ul>
+<li><strong>Qualité</strong> — Chaque produit est rigoureusement sélectionné</li>
+<li><strong>Confiance</strong> — Transparence totale sur nos prix et nos délais</li>
+<li><strong>Service</strong> — Une équipe à votre écoute avant et après l'achat</li>
+</ul>
+<p>Merci de votre confiance !</p>`;
+}
+
+function buildFaqPageHtml(shopName: string): string {
+  return `<h2>Questions fréquentes</h2>
+<h3>Quels sont les délais de livraison ?</h3>
+<p>Les commandes sont généralement expédiées sous 1 à 3 jours ouvrés. Le délai de livraison dépend de votre localisation.</p>
+<h3>Comment puis-je suivre ma commande ?</h3>
+<p>Un email de confirmation avec un numéro de suivi vous est envoyé dès l'expédition de votre commande.</p>
+<h3>Quelle est votre politique de retour ?</h3>
+<p>Vous disposez de 14 jours après réception pour retourner un article. Contactez notre service client pour initier un retour.</p>
+<h3>Comment contacter le service client ?</h3>
+<p>Vous pouvez nous contacter par email ou via le formulaire de contact disponible sur notre site. Nous répondons sous 24h.</p>
+<h3>Les paiements sont-ils sécurisés ?</h3>
+<p>Oui, toutes les transactions sont protégées par un cryptage SSL. Vos données bancaires ne sont jamais stockées sur nos serveurs.</p>`;
+}
 
 function DetailRow({ label, value, tone }: { label: string; value: string | number | boolean | null; tone?: "success" | "critical" | "subdued" }) {
   const displayValue = typeof value === "boolean" ? (value ? "✓ Oui" : "✗ Non") : String(value ?? "—");
@@ -287,10 +587,24 @@ function ScoreCard({ label, score, details }: { label: string; score: number; de
   );
 }
 
+const OPP_ACTIONS: Record<string, { selfUrl: string; selfLabel: string; aiType: string | null; aiLabel: string }> = {
+  MISSING_REVIEWS: { selfUrl: "https://apps.shopify.com/search?q=reviews", selfLabel: "Trouver une app d'avis", aiType: null, aiLabel: "Installez une app d'avis (Judge.me, Loox) depuis l'App Store" },
+  WEAK_DESCRIPTIONS: { selfUrl: "/admin/products", selfLabel: "Modifier mes produits", aiType: "AI_DESCRIPTIONS", aiLabel: "Générer les descriptions par IA" },
+  MISSING_BUNDLES: { selfUrl: "/admin/products", selfLabel: "Gérer mes produits", aiType: null, aiLabel: "Les bundles doivent être créés manuellement" },
+  MISSING_UPSELLS: { selfUrl: "/admin/collections", selfLabel: "Gérer mes collections", aiType: null, aiLabel: "L'upsell doit être configuré manuellement" },
+  SEO_IMPROVEMENT: { selfUrl: "/app/seo", selfLabel: "Ouvrir SEO Optimizer", aiType: "AI_SEO_FIX", aiLabel: "Corriger le SEO par IA" },
+  SPEED_OPTIMIZATION: { selfUrl: "/admin/themes", selfLabel: "Optimiser mon thème", aiType: null, aiLabel: "La vitesse dépend du thème et hébergement" },
+  PRICING_OPTIMIZATION: { selfUrl: "/admin/products", selfLabel: "Modifier les prix", aiType: "AI_COMPARE_PRICES", aiLabel: "Ajouter les prix barrés par IA" },
+  MISSING_TRUST_BADGES: { selfUrl: "/admin/themes", selfLabel: "Personnaliser mon thème", aiType: "AI_TRUST_PAGE", aiLabel: "Créer une page Trust par IA" },
+  UX_IMPROVEMENT: { selfUrl: "/admin/pages", selfLabel: "Gérer mes pages", aiType: "AI_CREATE_PAGES", aiLabel: "Créer les pages manquantes par IA" },
+};
+
 export default function ReportPage() {
-  const { analysis, totalRevenueImpact, appUrl } = useLoaderData<typeof loader>();
+  const { analysis, totalRevenueImpact, appUrl, hasAutomation, shopDomain } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const aiFetcher = useFetcher<any>();
   const [toastActive, setToastActive] = useState(false);
+  const [activeAiOpp, setActiveAiOpp] = useState<string | null>(null);
 
   const handleShare = useCallback(async () => {
     if (!analysis.shareSlug) return;
@@ -372,36 +686,111 @@ export default function ReportPage() {
               <Badge tone="attention">+{totalRevenueImpact}% de potentiel combiné</Badge>
             </InlineStack>
 
-            {analysis.opportunities.map((opp: any) => (
-              <Box
-                key={opp.id}
-                padding="300"
-                borderWidth="025"
-                borderColor="border"
-                borderRadius="200"
-              >
-                <BlockStack gap="200">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Badge
-                        tone={
-                          opp.priority === "CRITICAL" ? "critical" :
-                          opp.priority === "HIGH" ? "warning" : "info"
-                        }
-                      >
-                        {opp.priority}
-                      </Badge>
-                      <Text variant="headingSm" as="h4">{opp.title}</Text>
+            {analysis.opportunities.map((opp: any) => {
+              const actions = OPP_ACTIONS[opp.type] || { selfUrl: "/admin", selfLabel: "Shopify Admin", aiType: null, aiLabel: "Non automatisable" };
+              const isThisLoading = aiFetcher.state !== "idle" && activeAiOpp === opp.type;
+              const isExternal = actions.selfUrl.startsWith("http");
+              const isAdminUrl = actions.selfUrl.startsWith("/admin");
+              const selfHref = isAdminUrl ? `https://${shopDomain}${actions.selfUrl}` : actions.selfUrl;
+
+              const aiResult = aiFetcher.state === "idle" && aiFetcher.data && activeAiOpp === opp.type ? aiFetcher.data : null;
+
+              return (
+                <Box
+                  key={opp.id}
+                  padding="300"
+                  borderWidth="025"
+                  borderColor="border"
+                  borderRadius="200"
+                >
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <InlineStack gap="200" blockAlign="center">
+                        <Badge
+                          tone={
+                            opp.priority === "CRITICAL" ? "critical" :
+                            opp.priority === "HIGH" ? "warning" : "info"
+                          }
+                        >
+                          {opp.priority}
+                        </Badge>
+                        <Text variant="headingSm" as="h4">{opp.title}</Text>
+                      </InlineStack>
+                      <Badge tone="success">+{opp.impactPercent}%</Badge>
                     </InlineStack>
-                    <Badge tone="success">+{opp.impactPercent}%</Badge>
-                  </InlineStack>
-                  <Text variant="bodyMd" as="p">{opp.description}</Text>
-                  <Text variant="bodySm" as="p" tone="success" fontWeight="semibold">
-                    {opp.estimatedImpact}
-                  </Text>
-                </BlockStack>
-              </Box>
-            ))}
+                    <Text variant="bodyMd" as="p">{opp.description}</Text>
+                    <Text variant="bodySm" as="p" tone="success" fontWeight="semibold">
+                      {opp.estimatedImpact}
+                    </Text>
+
+                    {aiResult?.success && (
+                      <Banner tone="success" title="Action effectuée">
+                        <Text as="p">{aiResult.message}</Text>
+                        {aiResult.redirect && (
+                          <Button url={aiResult.redirect} variant="plain">Ouvrir</Button>
+                        )}
+                      </Banner>
+                    )}
+                    {aiResult?.error && (
+                      <Banner tone={aiResult.needsUpgrade ? "warning" : "critical"} title={aiResult.needsUpgrade ? "Plan requis" : "Erreur"}>
+                        <Text as="p">{aiResult.error}</Text>
+                        {aiResult.needsUpgrade && (
+                          <Button url="/app/billing" variant="plain">Passer au plan Automation+</Button>
+                        )}
+                      </Banner>
+                    )}
+
+                    <Divider />
+                    <InlineStack gap="200" align="start">
+                      <Button
+                        url={selfHref}
+                        external={isExternal || isAdminUrl}
+                        variant="secondary"
+                        size="slim"
+                      >
+                        {actions.selfLabel}
+                      </Button>
+
+                      {actions.aiType ? (
+                        hasAutomation ? (
+                          <Button
+                            variant="primary"
+                            size="slim"
+                            loading={isThisLoading}
+                            onClick={() => {
+                              setActiveAiOpp(opp.type);
+                              if (actions.aiType === "AI_SEO_FIX") {
+                                navigate("/app/seo");
+                                return;
+                              }
+                              aiFetcher.submit(
+                                { intent: "ai_fix_opportunity", aiActionType: actions.aiType! },
+                                { method: "post" }
+                              );
+                            }}
+                          >
+                            {actions.aiLabel}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="primary"
+                            size="slim"
+                            tone="critical"
+                            url="/app/billing"
+                          >
+                            {actions.aiLabel} (Automation+ requis)
+                          </Button>
+                        )
+                      ) : (
+                        <Button disabled size="slim" variant="tertiary">
+                          {actions.aiLabel}
+                        </Button>
+                      )}
+                    </InlineStack>
+                  </BlockStack>
+                </Box>
+              );
+            })}
           </BlockStack>
         </Card>
 

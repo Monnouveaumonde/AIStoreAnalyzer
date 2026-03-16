@@ -8,6 +8,10 @@ export interface OpportunityData {
   impactPercent: number;
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   category: string;
+  selfActionUrl: string;
+  selfActionLabel: string;
+  aiActionType: string | null;
+  aiActionLabel: string;
 }
 
 export function detectOpportunities(analysis: FullAnalysisResult): OpportunityData[] {
@@ -23,6 +27,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 18,
       priority: "HIGH",
       category: "Revenue",
+      selfActionUrl: "/admin/products",
+      selfActionLabel: "Gérer mes produits",
+      aiActionType: null,
+      aiActionLabel: "Les bundles doivent être créés manuellement dans Shopify",
     });
   }
 
@@ -36,6 +44,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 12,
       priority: "HIGH",
       category: "Revenue",
+      selfActionUrl: "/admin/collections",
+      selfActionLabel: "Gérer mes collections",
+      aiActionType: null,
+      aiActionLabel: "L'upsell et le cross-sell doivent être configurés manuellement",
     });
   }
 
@@ -49,6 +61,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 15,
       priority: "HIGH",
       category: "Conversion",
+      selfActionUrl: "/admin/products",
+      selfActionLabel: "Modifier mes produits",
+      aiActionType: "AI_DESCRIPTIONS",
+      aiActionLabel: "Générer les descriptions par IA",
     });
   }
 
@@ -62,6 +78,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 8,
       priority: "MEDIUM",
       category: "Trust",
+      selfActionUrl: "/admin/themes",
+      selfActionLabel: "Personnaliser mon thème",
+      aiActionType: "AI_TRUST_PAGE",
+      aiActionLabel: "Créer une page Trust par IA",
     });
   }
 
@@ -75,6 +95,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 20,
       priority: "CRITICAL",
       category: "Trust",
+      selfActionUrl: "https://apps.shopify.com/search?q=reviews",
+      selfActionLabel: "Trouver une app d'avis",
+      aiActionType: null,
+      aiActionLabel: "Installez une app d'avis (Judge.me, Loox) depuis l'App Store",
     });
   }
 
@@ -88,6 +112,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 10,
       priority: "MEDIUM",
       category: "Pricing",
+      selfActionUrl: "/admin/products",
+      selfActionLabel: "Modifier les prix",
+      aiActionType: "AI_COMPARE_PRICES",
+      aiActionLabel: "Ajouter les prix barrés par IA",
     });
   }
 
@@ -101,6 +129,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 25,
       priority: "HIGH",
       category: "Traffic",
+      selfActionUrl: "/app/seo",
+      selfActionLabel: "Ouvrir SEO Optimizer",
+      aiActionType: "AI_SEO_FIX",
+      aiActionLabel: "Corriger le SEO par IA",
     });
   }
 
@@ -114,6 +146,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 14,
       priority: "HIGH",
       category: "Performance",
+      selfActionUrl: "/admin/themes",
+      selfActionLabel: "Optimiser mon thème",
+      aiActionType: null,
+      aiActionLabel: "La vitesse dépend du thème et de l'hébergement Shopify",
     });
   }
 
@@ -127,6 +163,10 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       impactPercent: 11,
       priority: "MEDIUM",
       category: "UX",
+      selfActionUrl: "/admin/pages",
+      selfActionLabel: "Gérer mes pages",
+      aiActionType: "AI_CREATE_PAGES",
+      aiActionLabel: "Créer les pages manquantes par IA",
     });
   }
 
