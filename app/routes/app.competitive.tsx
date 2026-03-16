@@ -343,7 +343,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const existing = await prisma.watchedProduct.findFirst({
-      where: { shopId: shop.id, competitorDomain: urlObj.hostname },
+      where: { shopId: shop.id, competitorDomain: urlObj.hostname, isActive: true },
     });
     if (existing) {
       return json({ success: true, alreadyExists: true });
