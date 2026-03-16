@@ -141,6 +141,123 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
+function DetailRow({ label, value, tone }: { label: string; value: string | number | boolean | null; tone?: "success" | "critical" | "subdued" }) {
+  const displayValue = typeof value === "boolean" ? (value ? "✓ Oui" : "✗ Non") : String(value ?? "—");
+  const displayTone = typeof value === "boolean" ? (value ? "success" : "critical") : tone;
+  return (
+    <InlineStack align="space-between" blockAlign="center">
+      <Text variant="bodySm" as="p">{label}</Text>
+      <Text variant="bodySm" as="p" tone={displayTone} fontWeight="semibold">{displayValue}</Text>
+    </InlineStack>
+  );
+}
+
+function formatDetailsForCategory(label: string, details: any): React.ReactNode {
+  if (!details || typeof details !== "object") return null;
+
+  const rows: { label: string; value: any }[] = [];
+
+  if (label === "SEO") {
+    const mt = details.metaTitles;
+    const md = details.metaDescriptions;
+    const alt = details.altTexts;
+    if (mt) {
+      rows.push({ label: "Produits analysés", value: mt.total });
+      rows.push({ label: "Meta titles manquants", value: mt.missing });
+      rows.push({ label: "Meta titles trop longs", value: mt.tooLong });
+      rows.push({ label: "Meta titles dupliqués", value: mt.duplicates });
+    }
+    if (md) {
+      rows.push({ label: "Meta descriptions manquantes", value: md.missing });
+      rows.push({ label: "Meta descriptions trop courtes", value: md.tooShort });
+      rows.push({ label: "Meta descriptions trop longues", value: md.tooLong });
+    }
+    if (alt) {
+      rows.push({ label: "Images totales", value: alt.total });
+      rows.push({ label: "Images sans alt text", value: alt.missing });
+    }
+    rows.push({ label: "Sitemap présent", value: details.sitemapPresent });
+    rows.push({ label: "Robots.txt présent", value: details.robotsTxt });
+  } else if (label === "Vitesse") {
+    rows.push({ label: "Score performance", value: `${details.performanceScore ?? "—"}/100` });
+    rows.push({ label: "First Contentful Paint", value: details.firstContentfulPaint ? `${(details.firstContentfulPaint / 1000).toFixed(1)}s` : "—" });
+    rows.push({ label: "Largest Contentful Paint", value: details.largestContentfulPaint ? `${(details.largestContentfulPaint / 1000).toFixed(1)}s` : "—" });
+    rows.push({ label: "Time to Interactive", value: details.timeToInteractive ? `${(details.timeToInteractive / 1000).toFixed(1)}s` : "—" });
+    rows.push({ label: "Speed Index", value: details.speedIndex ? `${(details.speedIndex / 1000).toFixed(1)}s` : "—" });
+    rows.push({ label: "Total Blocking Time", value: details.totalBlockingTime ? `${details.totalBlockingTime}ms` : "—" });
+    rows.push({ label: "Cumulative Layout Shift", value: details.cumulativeLayoutShift ?? "—" });
+  } else if (label === "Produits") {
+    rows.push({ label: "Produits totaux", value: details.totalProducts });
+    rows.push({ label: "Avec descriptions", value: `${details.withDescriptions ?? 0}/${details.totalProducts}` });
+    rows.push({ label: "Avec images", value: `${details.withImages ?? 0}/${details.totalProducts}` });
+    rows.push({ label: "Avec prix", value: `${details.withPricing ?? 0}/${details.totalProducts}` });
+    rows.push({ label: "Avec variantes", value: `${details.withVariants ?? 0}/${details.totalProducts}` });
+    rows.push({ label: "Avec prix barré", value: `${details.withCompareAtPrice ?? 0}/${details.totalProducts}` });
+    rows.push({ label: "Images moy. par produit", value: details.avgImagesPerProduct });
+    rows.push({ label: "Longueur moy. description", value: `${details.avgDescriptionLength ?? 0} caractères` });
+  } else if (label === "UX") {
+    rows.push({ label: "Thème", value: details.themeInfo?.name ?? "—" });
+    rows.push({ label: "Nombre de pages", value: details.pageCount });
+    rows.push({ label: "Liens de navigation", value: details.menuItemCount });
+    rows.push({ label: "Profondeur de navigation", value: details.navigationDepth });
+    rows.push({ label: "Page À propos", value: details.hasAboutPage });
+    rows.push({ label: "Page Contact", value: details.hasContactPage });
+    rows.push({ label: "Page FAQ", value: details.hasFaqPage });
+    rows.push({ label: "Recherche activée", value: details.hasSearchEnabled });
+    rows.push({ label: "Optimisation mobile", value: details.hasMobileOptimization });
+    rows.push({ label: "Footer présent", value: details.hasFooter });
+  } else if (label === "Trust") {
+    rows.push({ label: "Avis clients", value: details.hasReviews });
+    rows.push({ label: "App d'avis détectée", value: details.reviewAppDetected ?? false });
+    rows.push({ label: "Badges de confiance", value: details.hasTrustBadges });
+    rows.push({ label: "Preuve sociale", value: details.hasSocialProof });
+    rows.push({ label: "Paiement sécurisé", value: details.hasSecureCheckout });
+    rows.push({ label: "Infos de contact", value: details.hasContactInfo });
+    rows.push({ label: "Politique de retour", value: details.hasRefundPolicy });
+    rows.push({ label: "Politique de livraison", value: details.hasShippingPolicy });
+    rows.push({ label: "Politique de confidentialité", value: details.hasPrivacyPolicy });
+    rows.push({ label: "Conditions générales", value: details.hasTermsOfService });
+  } else if (label === "Prix") {
+    rows.push({ label: "Prix moyen", value: `${details.avgPrice ?? 0} €` });
+    rows.push({ label: "Prix minimum", value: `${details.minPrice ?? 0} €` });
+    rows.push({ label: "Prix maximum", value: `${details.maxPrice ?? 0} €` });
+    rows.push({ label: "Écart de prix", value: `${details.priceRange ?? 0} €` });
+    rows.push({ label: "Réduction moyenne", value: `${details.avgDiscount ?? 0}%` });
+    rows.push({ label: "Produits avec prix barré", value: `${details.productsWithCompareAt ?? 0}/${details.totalProducts ?? 0}` });
+    rows.push({ label: "Seuil livraison gratuite", value: details.hasFreeShippingThreshold });
+    if (details.priceDistribution?.length) {
+      rows.push({ label: "—— Répartition des prix ——", value: "" });
+      for (const d of details.priceDistribution) {
+        rows.push({ label: `  ${d.range}`, value: `${d.count} produit${d.count > 1 ? "s" : ""}` });
+      }
+    }
+  } else if (label === "Conversion") {
+    const convLabels: Record<string, string> = {
+      hasCart: "Panier",
+      hasCheckoutCustomization: "Checkout personnalisé",
+      hasDiscountCodes: "Codes promo",
+      activeDiscounts: "Promos actives",
+      hasCollections: "Collections",
+      collectionCount: "Nombre de collections",
+      hasFeaturedProducts: "Produits mis en avant",
+      productOrganization: "Score organisation",
+    };
+    for (const [key, value] of Object.entries(details)) {
+      rows.push({ label: convLabels[key] || key, value: value as any });
+    }
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <BlockStack gap="100">
+      {rows.map((r, i) => (
+        <DetailRow key={i} label={r.label} value={r.value} />
+      ))}
+    </BlockStack>
+  );
+}
+
 function ScoreCard({ label, score, details }: { label: string; score: number; details?: any }) {
   const [open, setOpen] = useState(false);
   const tone = score >= 70 ? "success" : score >= 40 ? "warning" : "critical";
@@ -160,11 +277,7 @@ function ScoreCard({ label, score, details }: { label: string; score: number; de
             </Button>
             <Collapsible open={open} id={`details-${label}`}>
               <Box padding="200" background="bg-surface-secondary" borderRadius="100">
-                <Text variant="bodySm" as="p">
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: "12px" }}>
-                    {JSON.stringify(details, null, 2)}
-                  </pre>
-                </Text>
+                {formatDetailsForCategory(label, details)}
               </Box>
             </Collapsible>
           </>
