@@ -253,16 +253,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "add_watch_manual") {
     const myProductTitle = (formData.get("myProductTitle") as string | null)?.trim() ?? "";
-    const competitorName = (formData.get("competitorName") as string | null)?.trim() ?? "";
     const competitorUrl = (formData.get("competitorUrl") as string | null)?.trim() ?? "";
     const myCurrentPriceRaw = (formData.get("myCurrentPrice") as string | null)?.trim() ?? "";
     const myCurrentPrice = myCurrentPriceRaw ? Number(myCurrentPriceRaw) : null;
 
-    console.log(`[add_watch] Ajout manuel: title="${myProductTitle}" competitor="${competitorName}" url="${competitorUrl}" price="${myCurrentPriceRaw}"`);
-
-    if (!myProductTitle || !competitorName || !competitorUrl) {
-      console.log(`[add_watch] ERREUR: champ manquant`);
-      return json({ success: false, error: "Renseignez produit, concurrent et URL." }, { status: 400 });
+    if (!myProductTitle || !competitorUrl) {
+      return json({ success: false, error: "Renseignez le nom de votre produit et l'URL du concurrent." }, { status: 400 });
     }
 
     let urlObj: URL;
@@ -271,6 +267,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } catch {
       return json({ success: false, error: "URL concurrent invalide." }, { status: 400 });
     }
+
+    // Nom du concurrent : utilise le champ s'il est rempli, sinon extrait du domaine
+    const rawCompetitorName = (formData.get("competitorName") as string | null)?.trim() ?? "";
+    const competitorName = rawCompetitorName || urlObj.hostname.replace(/^www\./, "").split(".")[0];
+
+    console.log(`[add_watch] Ajout manuel: title="${myProductTitle}" competitor="${competitorName}" url="${competitorUrl}" price="${myCurrentPriceRaw}"`);
 
     const check = await canAddWatchedProduct(shopDomain);
     if (!check.allowed) {
@@ -1359,14 +1361,14 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
   const error = fetcher.data?.error;
 
   const handleSubmit = () => {
-    if (!myProductTitle || !competitorName || !competitorUrl) return;
+    if (!myProductTitle || !competitorUrl) return;
     const data: Record<string, string> = {
       intent: "add_watch_manual",
       shopDomain,
       myProductTitle,
-      competitorName,
       competitorUrl,
     };
+    if (competitorName) data.competitorName = competitorName;
     if (myCurrentPrice) data.myCurrentPrice = myCurrentPrice;
     fetcher.submit(data, { method: "post", action: contextualAction });
   };
@@ -1411,12 +1413,12 @@ function ManualAddForm({ contextualAction, shopDomain }: { contextualAction: str
           value={myCurrentPrice} onChange={(e) => setMyCurrentPrice(e.target.value)}
         />
         <input
-          name="competitorName" placeholder="Nom du concurrent" style={inputStyle}
-          value={competitorName} onChange={(e) => setCompetitorName(e.target.value)}
+          name="competitorUrl" type="url" placeholder="https://boutique-concurrente.com/produit *" style={inputStyle}
+          value={competitorUrl} onChange={(e) => setCompetitorUrl(e.target.value)}
         />
         <input
-          name="competitorUrl" type="url" placeholder="https://boutique-concurrente.com/produit" style={inputStyle}
-          value={competitorUrl} onChange={(e) => setCompetitorUrl(e.target.value)}
+          name="competitorName" placeholder="Nom du concurrent (auto-détecté si vide)" style={inputStyle}
+          value={competitorName} onChange={(e) => setCompetitorName(e.target.value)}
         />
       </InlineGrid>
       <Button onClick={handleSubmit} variant="primary" loading={isSubmitting}>
