@@ -587,17 +587,22 @@ function ScoreCard({ label, score, details }: { label: string; score: number; de
   );
 }
 
-const OPP_ACTIONS: Record<string, { selfUrl: string; selfLabel: string; aiType: string | null; aiLabel: string }> = {
-  MISSING_REVIEWS: { selfUrl: "https://apps.shopify.com/search?q=reviews", selfLabel: "Trouver une app d'avis", aiType: null, aiLabel: "Installez une app d'avis (Judge.me, Loox) depuis l'App Store" },
-  WEAK_DESCRIPTIONS: { selfUrl: "/admin/products", selfLabel: "Modifier mes produits", aiType: "AI_DESCRIPTIONS", aiLabel: "Générer les descriptions par IA" },
-  MISSING_BUNDLES: { selfUrl: "/admin/products", selfLabel: "Gérer mes produits", aiType: null, aiLabel: "Les bundles doivent être créés manuellement" },
-  MISSING_UPSELLS: { selfUrl: "/admin/collections", selfLabel: "Gérer mes collections", aiType: null, aiLabel: "L'upsell doit être configuré manuellement" },
-  SEO_IMPROVEMENT: { selfUrl: "/app/seo", selfLabel: "Ouvrir SEO Optimizer", aiType: "AI_SEO_FIX", aiLabel: "Corriger le SEO par IA" },
-  SPEED_OPTIMIZATION: { selfUrl: "/admin/themes", selfLabel: "Optimiser mon thème", aiType: null, aiLabel: "La vitesse dépend du thème et hébergement" },
-  PRICING_OPTIMIZATION: { selfUrl: "/admin/products", selfLabel: "Modifier les prix", aiType: "AI_COMPARE_PRICES", aiLabel: "Ajouter les prix barrés par IA" },
-  MISSING_TRUST_BADGES: { selfUrl: "/admin/themes", selfLabel: "Personnaliser mon thème", aiType: "AI_TRUST_PAGE", aiLabel: "Créer une page Trust par IA" },
-  UX_IMPROVEMENT: { selfUrl: "/admin/pages", selfLabel: "Gérer mes pages", aiType: "AI_CREATE_PAGES", aiLabel: "Créer les pages manquantes par IA" },
+const OPP_ACTIONS: Record<string, { adminPath: string | null; externalUrl: string | null; appUrl: string | null; selfLabel: string; aiType: string | null; aiLabel: string }> = {
+  MISSING_REVIEWS: { adminPath: null, externalUrl: "https://apps.shopify.com/search?q=reviews", appUrl: null, selfLabel: "Trouver une app d'avis", aiType: null, aiLabel: "Installez une app d'avis (Judge.me, Loox) depuis l'App Store" },
+  WEAK_DESCRIPTIONS: { adminPath: "products", externalUrl: null, appUrl: null, selfLabel: "Modifier mes produits", aiType: "AI_DESCRIPTIONS", aiLabel: "Générer les descriptions par IA" },
+  MISSING_BUNDLES: { adminPath: "products", externalUrl: null, appUrl: null, selfLabel: "Gérer mes produits", aiType: null, aiLabel: "Les bundles doivent être créés manuellement" },
+  MISSING_UPSELLS: { adminPath: "collections", externalUrl: null, appUrl: null, selfLabel: "Gérer mes collections", aiType: null, aiLabel: "L'upsell doit être configuré manuellement" },
+  SEO_IMPROVEMENT: { adminPath: null, externalUrl: null, appUrl: "/app/seo", selfLabel: "Ouvrir SEO Optimizer", aiType: "AI_SEO_FIX", aiLabel: "Corriger le SEO par IA" },
+  SPEED_OPTIMIZATION: { adminPath: "themes", externalUrl: null, appUrl: null, selfLabel: "Optimiser mon thème", aiType: null, aiLabel: "La vitesse dépend du thème et hébergement" },
+  PRICING_OPTIMIZATION: { adminPath: "products", externalUrl: null, appUrl: null, selfLabel: "Modifier les prix", aiType: "AI_COMPARE_PRICES", aiLabel: "Ajouter les prix barrés par IA" },
+  MISSING_TRUST_BADGES: { adminPath: "themes", externalUrl: null, appUrl: null, selfLabel: "Personnaliser mon thème", aiType: "AI_TRUST_PAGE", aiLabel: "Créer une page Trust par IA" },
+  UX_IMPROVEMENT: { adminPath: "pages", externalUrl: null, appUrl: null, selfLabel: "Gérer mes pages", aiType: "AI_CREATE_PAGES", aiLabel: "Créer les pages manquantes par IA" },
 };
+
+function buildAdminUrl(shopDomain: string, path: string): string {
+  const storeName = shopDomain.replace(".myshopify.com", "");
+  return `https://admin.shopify.com/store/${storeName}/${path}`;
+}
 
 export default function ReportPage() {
   const { analysis, totalRevenueImpact, appUrl, hasAutomation, shopDomain } = useLoaderData<typeof loader>();
@@ -687,11 +692,17 @@ export default function ReportPage() {
             </InlineStack>
 
             {analysis.opportunities.map((opp: any) => {
-              const actions = OPP_ACTIONS[opp.type] || { selfUrl: "/admin", selfLabel: "Shopify Admin", aiType: null, aiLabel: "Non automatisable" };
+              const actions = OPP_ACTIONS[opp.type] || { adminPath: null, externalUrl: null, appUrl: null, selfLabel: "Shopify Admin", aiType: null, aiLabel: "Non automatisable" };
               const isThisLoading = aiFetcher.state !== "idle" && activeAiOpp === opp.type;
-              const isExternal = actions.selfUrl.startsWith("http");
-              const isAdminUrl = actions.selfUrl.startsWith("/admin");
-              const selfHref = isAdminUrl ? `https://${shopDomain}${actions.selfUrl}` : actions.selfUrl;
+
+              const selfHref = actions.externalUrl
+                ? actions.externalUrl
+                : actions.appUrl
+                  ? actions.appUrl
+                  : actions.adminPath
+                    ? buildAdminUrl(shopDomain, actions.adminPath)
+                    : "#";
+              const isExternal = !!actions.externalUrl || !!actions.adminPath;
 
               const aiResult = aiFetcher.state === "idle" && aiFetcher.data && activeAiOpp === opp.type ? aiFetcher.data : null;
 
@@ -727,7 +738,7 @@ export default function ReportPage() {
                       <Banner tone="success" title="Action effectuée">
                         <Text as="p">{aiResult.message}</Text>
                         {aiResult.redirect && (
-                          <Button url={aiResult.redirect} variant="plain">Ouvrir</Button>
+                          <Button url={aiResult.redirect}>Ouvrir</Button>
                         )}
                       </Banner>
                     )}
@@ -735,7 +746,7 @@ export default function ReportPage() {
                       <Banner tone={aiResult.needsUpgrade ? "warning" : "critical"} title={aiResult.needsUpgrade ? "Plan requis" : "Erreur"}>
                         <Text as="p">{aiResult.error}</Text>
                         {aiResult.needsUpgrade && (
-                          <Button url="/app/billing" variant="plain">Passer au plan Automation+</Button>
+                          <Button url="/app/billing">Passer au plan Automation+</Button>
                         )}
                       </Banner>
                     )}
@@ -744,7 +755,7 @@ export default function ReportPage() {
                     <InlineStack gap="200" align="start">
                       <Button
                         url={selfHref}
-                        external={isExternal || isAdminUrl}
+                        external={isExternal}
                         variant="secondary"
                         size="slim"
                       >
@@ -760,7 +771,7 @@ export default function ReportPage() {
                             onClick={() => {
                               setActiveAiOpp(opp.type);
                               if (actions.aiType === "AI_SEO_FIX") {
-                                navigate("/app/seo");
+                                window.open(selfHref === "/app/seo" ? "/app/seo" : "/app/seo", "_top");
                                 return;
                               }
                               aiFetcher.submit(
