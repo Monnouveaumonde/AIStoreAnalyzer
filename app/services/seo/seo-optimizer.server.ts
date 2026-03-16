@@ -220,6 +220,61 @@ async function applyAltTextMutation(
 }
 
 /**
+ * Applique title + description en une seule mutation pour éviter l'écrasement.
+ * Utilise la valeur existante de Shopify pour le champ non modifié.
+ */
+export async function applyMergedSeoOptimization(
+  admin: AdminApiContext,
+  input: {
+    seoScanId: string;
+    shopId: string;
+    resourceType: string;
+    resourceId: string;
+    resourceTitle: string;
+    titleIssue?: { issueId: string; issueType: string; oldValue: string | null; newValue: string };
+    descIssue?: { issueId: string; issueType: string; oldValue: string | null; newValue: string };
+  }
+): Promise<{ success: boolean; error?: string }> {
+  const seoFields: Record<string, string> = {};
+  if (input.titleIssue) seoFields.title = input.titleIssue.newValue;
+  if (input.descIssue) seoFields.description = input.descIssue.newValue;
+
+  if (Object.keys(seoFields).length === 0) return { success: false, error: "Aucun champ" };
+
+  const success = await applySeoMutation(admin, input.resourceType, input.resourceId, {
+    metaTitle: seoFields.title,
+    metaDescription: seoFields.description,
+  });
+
+  const issues = [input.titleIssue, input.descIssue].filter(Boolean) as { issueId: string; issueType: string; oldValue: string | null; newValue: string }[];
+  for (const issue of issues) {
+    await prisma.seoOptimization.create({
+      data: {
+        seoScanId: input.seoScanId,
+        shopId: input.shopId,
+        issueType: issue.issueType as any,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        resourceTitle: input.resourceTitle,
+        fieldName: issue.issueType.includes("TITLE") ? "metaTitle" : "metaDescription",
+        oldValue: issue.oldValue,
+        newValue: issue.newValue,
+        appliedByAi: true,
+        shopifyMutationSuccess: success,
+      },
+    });
+    if (success) {
+      await prisma.seoIssue.update({
+        where: { id: issue.issueId },
+        data: { isFixed: true, fixedAt: new Date() },
+      }).catch(() => {});
+    }
+  }
+
+  return { success, error: success ? undefined : "Mutation échouée" };
+}
+
+/**
  * Retourne le résumé SEO pour le dashboard d'une boutique.
  */
 export async function getSeoScanDashboard(shopDomain: string) {

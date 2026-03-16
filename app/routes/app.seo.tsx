@@ -32,7 +32,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runSeoScan } from "../services/seo/seo-scanner.server";
 import { batchGenerateSuggestions } from "../services/seo/seo-ai.server";
-import { getSeoScanDashboard, applyOptimization } from "../services/seo/seo-optimizer.server";
+import { getSeoScanDashboard, applyOptimization, applyMergedSeoOptimization } from "../services/seo/seo-optimizer.server";
 import { hasPaidModulesAccess } from "../services/billing/plans.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -117,46 +117,74 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let failed = 0;
     let skipped = 0;
 
-    const prepared = fixableIssues.map((issue) => {
+    // Regrouper title + description par ressource pour une seule mutation
+    type SeoGroup = {
+      resourceType: string; resourceId: string; resourceTitle: string;
+      titleIssue?: { issueId: string; issueType: string; oldValue: string | null; newValue: string };
+      descIssue?: { issueId: string; issueType: string; oldValue: string | null; newValue: string };
+      altTexts: { issueId: string; issueType: string; resourceId: string; oldValue: string | null; newValue: string }[];
+    };
+    const resourceGroups = new Map<string, SeoGroup>();
+
+    for (const issue of fixableIssues) {
       const fieldName =
         issue.issueType.includes("META_TITLE") ? "metaTitle"
         : issue.issueType.includes("META_DESCRIPTION") ? "metaDescription"
         : issue.issueType === "MISSING_ALT_TEXT" ? "altText"
         : null;
       const suggestion = suggestionsMap.get(issue.id);
-      return { issue, fieldName, suggestion };
-    });
+      if (!fieldName || !suggestion) { skipped++; continue; }
 
-    const actionable = prepared.filter((p) => p.fieldName && p.suggestion);
-    skipped = prepared.length - actionable.length;
+      if (fieldName === "altText") {
+        const key = `alt_${issue.id}`;
+        resourceGroups.set(key, {
+          resourceType: issue.resourceType, resourceId: issue.resourceId, resourceTitle: issue.resourceTitle,
+          altTexts: [{ issueId: issue.id, issueType: issue.issueType, resourceId: issue.resourceId, oldValue: issue.currentValue, newValue: suggestion }],
+        });
+        continue;
+      }
 
-    console.log(`[auto-fix] Application: ${actionable.length} actionable, ${skipped} skipped sur ${prepared.length} total`);
+      const key = `seo_${issue.resourceId}`;
+      if (!resourceGroups.has(key)) {
+        resourceGroups.set(key, { resourceType: issue.resourceType, resourceId: issue.resourceId, resourceTitle: issue.resourceTitle, altTexts: [] });
+      }
+      const group = resourceGroups.get(key)!;
+      const payload = { issueId: issue.id, issueType: issue.issueType, oldValue: issue.currentValue, newValue: suggestion };
+      if (fieldName === "metaTitle") group.titleIssue = payload;
+      else group.descIssue = payload;
+    }
+
+    const groups = Array.from(resourceGroups.values());
+    console.log(`[auto-fix] ${groups.length} groupes de ressources, ${skipped} skipped`);
 
     const BATCH_SIZE = 4;
-    for (let i = 0; i < actionable.length; i += BATCH_SIZE) {
-      const batch = actionable.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < groups.length; i += BATCH_SIZE) {
+      const batch = groups.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
-        batch.map(({ issue, fieldName, suggestion }) =>
-          applyOptimization(admin, {
-            seoScanId: latestScan.id,
-            shopId: shop.id,
-            issueId: issue.id,
-            issueType: issue.issueType,
-            resourceType: issue.resourceType,
-            resourceId: issue.resourceId,
-            resourceTitle: issue.resourceTitle,
-            fieldName: fieldName!,
-            oldValue: issue.currentValue,
-            newValue: suggestion!,
-          }).then((r) => {
-            if (r.success) { fixed++; } else { failed++; console.log(`[auto-fix] ECHEC: ${issue.resourceTitle} - ${r.error}`); }
-          })
-        )
+        batch.map(async (group) => {
+          for (const alt of group.altTexts) {
+            const r = await applyOptimization(admin, {
+              seoScanId: latestScan.id, shopId: shop.id, issueId: alt.issueId, issueType: alt.issueType,
+              resourceType: group.resourceType, resourceId: alt.resourceId, resourceTitle: group.resourceTitle,
+              fieldName: "altText", oldValue: alt.oldValue, newValue: alt.newValue,
+            });
+            if (r.success) fixed++; else failed++;
+          }
+          if (group.titleIssue || group.descIssue) {
+            const r = await applyMergedSeoOptimization(admin, {
+              seoScanId: latestScan.id, shopId: shop.id,
+              resourceType: group.resourceType, resourceId: group.resourceId, resourceTitle: group.resourceTitle,
+              titleIssue: group.titleIssue, descIssue: group.descIssue,
+            });
+            const count = (group.titleIssue ? 1 : 0) + (group.descIssue ? 1 : 0);
+            if (r.success) fixed += count; else { failed += count; console.log(`[auto-fix] ECHEC: ${group.resourceTitle} - ${r.error}`); }
+          }
+        })
       );
       for (const r of results) {
         if (r.status === "rejected") { failed++; console.log(`[auto-fix] ERREUR: ${r.reason}`); }
       }
-      if (i + BATCH_SIZE < actionable.length) {
+      if (i + BATCH_SIZE < groups.length) {
         await new Promise((r) => setTimeout(r, 300));
       }
     }
