@@ -34,12 +34,14 @@ export function OpportunityCard({ opportunity }: OpportunityCardProps) {
               {opportunity.title}
             </Text>
           </InlineStack>
-          <Badge tone="success">+{opportunity.impactPercent}%</Badge>
+          <Badge tone={priorityTone[opportunity.priority] ?? "info"}>
+            {opportunity.priority === "CRITICAL" ? "Impact majeur" : opportunity.priority === "HIGH" ? "Impact élevé" : "Impact modéré"}
+          </Badge>
         </InlineStack>
         <Text variant="bodyMd" as="p">
           {opportunity.description}
         </Text>
-        <Text variant="bodySm" as="p" tone="success" fontWeight="semibold">
+        <Text variant="bodySm" as="p" tone="subdued">
           {opportunity.estimatedImpact}
         </Text>
       </BlockStack>

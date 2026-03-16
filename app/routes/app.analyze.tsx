@@ -189,13 +189,10 @@ export default function AnalyzePage() {
                     </Text>
                     <ProgressBar progress={50} tone="highlight" />
                     {plan === "FREE" && (
-                      <Banner tone="info">
-                        <Text as="p">
-                          Pendant que l'analyse tourne : debloquez les modules SEO Optimizer et
-                          Espionnage concurrentiel avec un plan payant.
-                        </Text>
-                        <Button url="/app/billing">Voir les plans</Button>
-                      </Banner>
+                      <Text as="p" tone="subdued">
+                        Passez à un plan payant pour débloquer les modules SEO Optimizer et
+                        Veille concurrentielle.
+                      </Text>
                     )}
                   </BlockStack>
                 </Box>
@@ -208,7 +205,7 @@ export default function AnalyzePage() {
                       Analyse terminée ! Score : {actionData.score}/100
                     </Text>
                     <Text as="p">
-                      Potentiel d'augmentation des revenus : +{actionData.totalImpact}%
+                      {actionData.totalImpact} opportunité{actionData.totalImpact > 1 ? "s" : ""} d'amélioration détectée{actionData.totalImpact > 1 ? "s" : ""}
                     </Text>
                     <Button url={`/app/report/${actionData.analysisId}`}>
                       Voir le rapport complet
@@ -271,21 +268,21 @@ export default function AnalyzePage() {
               </InlineStack>
               <Text variant="bodySm" as="p" tone="subdued">
                 Activez ces modules pour transformer le diagnostic en actions automatiques
-                (optimisation SEO et reponse aux variations de prix concurrentes).
+                (optimisation SEO et réponse aux variations de prix concurrentes).
               </Text>
               <BlockStack gap="200">
                 <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
                   <Text variant="bodySm" as="p" fontWeight="semibold">SEO Optimizer</Text>
-                  <Text variant="bodySm" as="p" tone="subdued">Corrections SEO assistees par IA.</Text>
+                  <Text variant="bodySm" as="p" tone="subdued">Corrections SEO assistées par IA.</Text>
                 </Box>
                 <Box padding="200" borderWidth="025" borderColor="border" borderRadius="100">
-                  <Text variant="bodySm" as="p" fontWeight="semibold">Espionnage concurrentiel</Text>
+                  <Text variant="bodySm" as="p" fontWeight="semibold">Veille concurrentielle</Text>
                   <Text variant="bodySm" as="p" tone="subdued">Alertes prix + suggestions de reaction.</Text>
                 </Box>
               </BlockStack>
               {plan === "FREE" ? (
                 <Button variant="primary" url="/app/billing">
-                  Debloquer les modules
+                  Débloquer les modules
                 </Button>
               ) : (
                 <InlineStack gap="200">

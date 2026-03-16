@@ -12,12 +12,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { title: `Store Score: ${score}/100 — ${shop} | ShopPulseAi` },
     {
       name: "description",
-      content: `Analyse complète de ${shop}: Score ${score}/100. Découvrez les opportunités de revenus et améliorez votre boutique Shopify.`,
+      content: `Analyse complète de ${shop}: Score ${score}/100. Découvrez les opportunités d'amélioration pour votre boutique Shopify.`,
     },
     { property: "og:title", content: `${shop} a obtenu ${score}/100 sur ShopPulseAi` },
     {
       property: "og:description",
-      content: `${data.analysis.opportunityCount} opportunités de revenus détectées. Analysez votre boutique gratuitement !`,
+      content: `${data.analysis.opportunityCount} opportunité${data.analysis.opportunityCount > 1 ? "s" : ""} d'amélioration détectée${data.analysis.opportunityCount > 1 ? "s" : ""}. Analysez votre boutique gratuitement !`,
     },
     { property: "og:type", content: "website" },
     { name: "twitter:card", content: "summary_large_image" },
@@ -85,10 +85,7 @@ export default function PublicReport() {
 
   const scoreColor = score >= 70 ? "#22c55e" : score >= 40 ? "#f59e0b" : "#ef4444";
 
-  const totalImpact = analysis.opportunities.reduce(
-    (acc: number, o: any) => acc + o.impactPercent,
-    0
-  );
+  const oppCount = analysis.opportunities.length;
 
   return (
     <html lang="fr">
@@ -162,17 +159,15 @@ export default function PublicReport() {
           {/* Opportunités */}
           <section className="opportunities">
             <h2>
-              {analysis.opportunityCount} opportunités de revenus détectées
-              <span className="impact-badge">+{totalImpact}% potentiel</span>
+              {analysis.opportunityCount} opportunité{analysis.opportunityCount > 1 ? "s" : ""} d'amélioration détectée{analysis.opportunityCount > 1 ? "s" : ""}
             </h2>
             <div className="opp-list">
               {analysis.opportunities.map((opp: any, i: number) => (
                 <div key={i} className="opp-card">
                   <div className="opp-header">
                     <span className={`priority priority-${opp.priority.toLowerCase()}`}>
-                      {opp.priority}
+                      {opp.priority === "CRITICAL" ? "Impact majeur" : opp.priority === "HIGH" ? "Impact élevé" : "Impact modéré"}
                     </span>
-                    <span className="opp-impact">+{opp.impactPercent}%</span>
                   </div>
                   <h3>{opp.title}</h3>
                   <p>{opp.description}</p>
@@ -184,10 +179,10 @@ export default function PublicReport() {
 
           {/* CTA */}
           <section className="cta-section">
-            <h2>Corrigez automatiquement ces problèmes</h2>
+            <h2>Corrigez ces points d'amélioration</h2>
             <p>
               Installez ShopPulseAi et obtenez un coaching IA personnalisé
-              avec des actions concrètes pour booster vos ventes.
+              avec des actions concrètes pour optimiser votre boutique.
             </p>
             <a
               href="https://apps.shopify.com/ai-store-analyzer"

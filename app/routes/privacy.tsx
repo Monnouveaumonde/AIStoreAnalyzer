@@ -60,7 +60,7 @@ export default function PrivacyPolicy() {
           <p>Les données collectées sont utilisées exclusivement pour :</p>
           <ul>
             <li>Générer les analyses SEO, vitesse, et recommandations de votre boutique</li>
-            <li>Calculer le Store Score et les opportunités de revenus</li>
+            <li>Calculer le Store Score et les opportunités d'amélioration</li>
             <li>Afficher l'historique de vos analyses dans le dashboard</li>
             <li>Gérer votre abonnement via Shopify Billing</li>
           </ul>

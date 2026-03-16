@@ -1639,40 +1639,43 @@ export default function CompetitiveDashboard() {
     >
       <BlockStack gap="500">
 
-        {/* Bandeau plan + quota ──────────────────────────────────────────── */}
-        <Banner tone={limitReached ? "warning" : "info"}>
-          <InlineStack gap="200" align="space-between" blockAlign="center">
-            <Text as="p">
-              Plan <Badge tone="info">{plan}</Badge> — Produits surveillés :{" "}
-              <strong>{current}/{limit === -1 ? "∞" : limit}</strong>
-            </Text>
-            {limitReached && (
-              <Button variant="primary" onClick={() => navigate("/app/billing")}>
-                Passer au Pro ($19/mois)
-              </Button>
-            )}
-          </InlineStack>
-        </Banner>
-
-        {/* Alertes non lues (en priorité) */}
-        {unreadAlerts > 0 && (
+        {unreadAlerts > 0 ? (
           <Banner tone="critical">
+            <BlockStack gap="200">
+              <InlineStack gap="200" align="space-between" blockAlign="center">
+                <Text as="p">
+                  <strong>{unreadAlerts} nouvelle{unreadAlerts > 1 ? "s" : ""} alerte{unreadAlerts > 1 ? "s" : ""}</strong>
+                  {" "}— un concurrent a changé son prix !
+                </Text>
+                <InlineStack gap="200">
+                  <Button
+                    variant="plain"
+                    onClick={() => submit({ intent: "mark_all_read" }, { method: "post" })}
+                  >
+                    Tout marquer comme lu
+                  </Button>
+                  <Button url="/app/competitive/alerts">
+                    Voir les alertes
+                  </Button>
+                </InlineStack>
+              </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Plan {plan} — {current}/{limit === -1 ? "∞" : limit} produits surveillés
+              </Text>
+            </BlockStack>
+          </Banner>
+        ) : (
+          <Banner tone={limitReached ? "warning" : "info"}>
             <InlineStack gap="200" align="space-between" blockAlign="center">
               <Text as="p">
-                <strong>{unreadAlerts} nouvelle{unreadAlerts > 1 ? "s" : ""} alerte{unreadAlerts > 1 ? "s" : ""}</strong>
-                {" "}— un concurrent a changé son prix !
+                Plan <Badge tone="info">{plan}</Badge> — Produits surveillés :{" "}
+                <strong>{current}/{limit === -1 ? "∞" : limit}</strong>
               </Text>
-              <InlineStack gap="200">
-                <Button
-                  variant="plain"
-                  onClick={() => submit({ intent: "mark_all_read" }, { method: "post" })}
-                >
-                  Tout marquer comme lu
+              {limitReached && (
+                <Button variant="primary" onClick={() => navigate("/app/billing")}>
+                  Passer au Pro ($19/mois)
                 </Button>
-                <Button url="/app/competitive/alerts">
-                  Voir les alertes
-                </Button>
-              </InlineStack>
+              )}
             </InlineStack>
           </Banner>
         )}

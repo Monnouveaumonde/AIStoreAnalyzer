@@ -5,6 +5,7 @@ export interface OpportunityData {
   title: string;
   description: string;
   estimatedImpact: string;
+  impactLevel: "critical" | "high" | "medium" | "low";
   impactPercent: number;
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   category: string;
@@ -22,8 +23,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "MISSING_BUNDLES",
       title: "Créer des bundles de produits",
       description:
-        "Aucun bundle détecté. Les bundles permettent d'augmenter le panier moyen en proposant des lots à prix avantageux.",
-      estimatedImpact: "Ajouter des bundles peut augmenter le revenu de +18%",
+        "Aucun bundle détecté. Les bundles peuvent contribuer à augmenter le panier moyen en proposant des lots à prix avantageux.",
+      estimatedImpact: "Les bundles sont un levier reconnu pour améliorer le panier moyen",
+      impactLevel: "high",
       impactPercent: 18,
       priority: "HIGH",
       category: "Revenue",
@@ -39,8 +41,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "MISSING_UPSELLS",
       title: "Configurer l'upsell et le cross-sell",
       description:
-        "Les recommandations de produits et les upsells ne sont pas optimisés. Proposer des produits complémentaires augmente significativement le AOV.",
-      estimatedImpact: "L'upsell peut augmenter le panier moyen de +12%",
+        "Les recommandations de produits et les upsells ne sont pas encore optimisés. Proposer des produits complémentaires peut contribuer à améliorer le panier moyen.",
+      estimatedImpact: "L'upsell est une pratique courante pour améliorer la valeur des commandes",
+      impactLevel: "high",
       impactPercent: 12,
       priority: "HIGH",
       category: "Revenue",
@@ -56,8 +59,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "WEAK_DESCRIPTIONS",
       title: "Améliorer les descriptions produits",
       description:
-        `Descriptions moyennes de ${analysis.products.details.avgDescriptionLength} caractères. Des descriptions détaillées avec bénéfices et storytelling convertissent 30% mieux.`,
-      estimatedImpact: "Des descriptions optimisées augmentent la conversion de +15%",
+        `Descriptions moyennes de ${analysis.products.details.avgDescriptionLength} caractères. Des descriptions détaillées avec bénéfices et storytelling tendent à mieux convertir.`,
+      estimatedImpact: "Des descriptions riches aident les visiteurs à prendre une décision d'achat",
+      impactLevel: "high",
       impactPercent: 15,
       priority: "HIGH",
       category: "Conversion",
@@ -73,8 +77,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "MISSING_TRUST_BADGES",
       title: "Ajouter des badges de confiance",
       description:
-        "Aucun badge de confiance détecté (paiement sécurisé, livraison gratuite, garantie). Ces éléments réduisent l'anxiété d'achat.",
-      estimatedImpact: "Les badges de confiance augmentent la conversion de +8%",
+        "Aucun badge de confiance détecté (paiement sécurisé, livraison gratuite, garantie). Ces éléments contribuent à réduire l'anxiété d'achat.",
+      estimatedImpact: "Les badges de confiance rassurent les visiteurs et facilitent la conversion",
+      impactLevel: "medium",
       impactPercent: 8,
       priority: "MEDIUM",
       category: "Trust",
@@ -90,8 +95,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "MISSING_REVIEWS",
       title: "Mettre en place un système d'avis clients",
       description:
-        "Aucun avis client détecté. 93% des consommateurs lisent les avis avant d'acheter. La preuve sociale est le levier de conversion #1.",
-      estimatedImpact: "Les avis clients augmentent la conversion de +20%",
+        "Aucun avis client détecté. La preuve sociale est considérée comme un facteur clé dans la décision d'achat en ligne.",
+      estimatedImpact: "Les avis clients renforcent la confiance et peuvent améliorer la conversion",
+      impactLevel: "critical",
       impactPercent: 20,
       priority: "CRITICAL",
       category: "Trust",
@@ -107,8 +113,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "PRICING_OPTIMIZATION",
       title: "Optimiser la stratégie de prix",
       description:
-        "Le prix barré (compare-at price) n'est pas utilisé sur la majorité des produits. L'ancrage prix est un puissant levier psychologique.",
-      estimatedImpact: "L'ancrage prix augmente le taux de conversion de +10%",
+        "Le prix barré (compare-at price) n'est pas utilisé sur la majorité des produits. L'ancrage prix est un levier psychologique reconnu.",
+      estimatedImpact: "L'affichage du prix barré aide les visiteurs à percevoir la valeur de l'offre",
+      impactLevel: "medium",
       impactPercent: 10,
       priority: "MEDIUM",
       category: "Pricing",
@@ -124,8 +131,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "SEO_IMPROVEMENT",
       title: "Corriger les lacunes SEO",
       description:
-        `Score SEO: ${analysis.seo.score}/100. Des meta titles et descriptions manquent sur plusieurs produits, réduisant la visibilité organique.`,
-      estimatedImpact: "Un bon SEO peut augmenter le trafic organique de +25%",
+        `Score SEO : ${analysis.seo.score}/100. Des meta titles et descriptions manquent sur plusieurs produits, ce qui peut réduire la visibilité organique.`,
+      estimatedImpact: "Un SEO complet aide à améliorer le référencement naturel de votre boutique",
+      impactLevel: "high",
       impactPercent: 25,
       priority: "HIGH",
       category: "Traffic",
@@ -141,8 +149,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "SPEED_OPTIMIZATION",
       title: "Améliorer la vitesse du site",
       description:
-        `Score vitesse: ${analysis.speed.score}/100. Chaque seconde de chargement supplémentaire réduit la conversion de 7%.`,
-      estimatedImpact: "Améliorer la vitesse peut augmenter la conversion de +14%",
+        `Score vitesse : ${analysis.speed.score}/100. Un temps de chargement élevé peut décourager les visiteurs et nuire à la conversion.`,
+      estimatedImpact: "Un site rapide offre une meilleure expérience et favorise la conversion",
+      impactLevel: "high",
       impactPercent: 14,
       priority: "HIGH",
       category: "Performance",
@@ -158,8 +167,9 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
       type: "UX_IMPROVEMENT",
       title: "Améliorer l'expérience utilisateur",
       description:
-        "Des pages essentielles (À propos, Contact, FAQ) sont manquantes. Une UX complète rassure et guide le visiteur vers l'achat.",
-      estimatedImpact: "Une meilleure UX peut augmenter la conversion de +11%",
+        "Des pages essentielles (À propos, Contact, FAQ) sont manquantes. Une UX complète rassure et guide le visiteur dans son parcours d'achat.",
+      estimatedImpact: "Des pages complètes renforcent la crédibilité de votre boutique",
+      impactLevel: "medium",
       impactPercent: 11,
       priority: "MEDIUM",
       category: "UX",
@@ -174,8 +184,5 @@ export function detectOpportunities(analysis: FullAnalysisResult): OpportunityDa
 }
 
 export function calculateTotalRevenueImpact(opportunities: OpportunityData[]): number {
-  const combined = opportunities.reduce((acc, opp) => {
-    return acc * (1 + opp.impactPercent / 100);
-  }, 1);
-  return Math.round((combined - 1) * 100);
+  return opportunities.length;
 }

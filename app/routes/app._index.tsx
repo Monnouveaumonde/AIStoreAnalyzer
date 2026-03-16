@@ -382,8 +382,11 @@ export default function Dashboard() {
               </Text>
             </BlockStack>
 
-            {/* Pré-requis explicite */}
-            {!isPaid && (
+            {actionData && "saved" in actionData && actionData.saved ? (
+              <Banner tone="success">
+                <Text as="p">Réglages d'automatisation enregistrés avec succès.</Text>
+              </Banner>
+            ) : !isPaid ? (
               <Banner tone="warning">
                 <BlockStack gap="100">
                   <Text as="p" fontWeight="semibold">Plan payant requis</Text>
@@ -398,8 +401,7 @@ export default function Dashboard() {
                   </InlineStack>
                 </BlockStack>
               </Banner>
-            )}
-            {isPaid && !hasAutomationAddon && (
+            ) : !hasAutomationAddon ? (
               <Banner tone="info">
                 <BlockStack gap="100">
                   <Text as="p" fontWeight="semibold">Addon Automation+ requis</Text>
@@ -414,13 +416,7 @@ export default function Dashboard() {
                   </InlineStack>
                 </BlockStack>
               </Banner>
-            )}
-
-            {actionData && "saved" in actionData && actionData.saved && (
-              <Banner tone="success">
-                <Text as="p">Réglages d'automatisation enregistrés avec succès.</Text>
-              </Banner>
-            )}
+            ) : null}
 
             <form
               method="post"
@@ -603,7 +599,7 @@ export default function Dashboard() {
                         size="small"
                       />
                       <Text variant="bodySm" as="p" tone="subdued">
-                        {latestAnalysis.opportunityCount} opportunités de revenus détectées
+                        {latestAnalysis.opportunityCount} opportunité{latestAnalysis.opportunityCount > 1 ? "s" : ""} d'amélioration
                       </Text>
                     </BlockStack>
                   </Box>

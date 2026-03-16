@@ -132,16 +132,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   if (!analysis) throw new Response("Not found", { status: 404 });
 
-  const totalImpact = analysis.opportunities.reduce(
-    (acc: number, o: any) => acc * (1 + o.impactPercent / 100),
-    1
-  );
-
   const automationAccess = await hasFeatureAccess(session.shop, "competitive_automation_plus");
 
   return json({
     analysis,
-    totalRevenueImpact: Math.round((totalImpact - 1) * 100),
     appUrl: process.env.SHOPIFY_APP_URL || "",
     hasAutomation: automationAccess.allowed,
     shopDomain: session.shop,
@@ -604,7 +598,7 @@ function buildAdminUrl(_shopDomain: string, path: string): string {
 }
 
 export default function ReportPage() {
-  const { analysis, totalRevenueImpact, appUrl, hasAutomation, shopDomain } = useLoaderData<typeof loader>();
+  const { analysis, appUrl, hasAutomation, shopDomain } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const aiFetcher = useFetcher<any>();
   const [toastActive, setToastActive] = useState(false);
@@ -620,11 +614,6 @@ export default function ReportPage() {
     }
     setToastActive(true);
   }, [analysis.shareSlug, appUrl]);
-
-  const totalImpact = analysis.opportunities.reduce(
-    (acc: number, o: any) => acc + o.impactPercent,
-    0
-  );
 
   return (
     <Frame>
@@ -685,9 +674,9 @@ export default function ReportPage() {
           <BlockStack gap="400">
             <InlineStack align="space-between" blockAlign="center">
               <Text variant="headingLg" as="h2">
-                Opportunités de revenus
+                Opportunités d'amélioration
               </Text>
-              <Badge tone="attention">+{totalRevenueImpact}% de potentiel combiné</Badge>
+              <Badge tone="attention">{analysis.opportunities.length} opportunité{analysis.opportunities.length > 1 ? "s" : ""} détectée{analysis.opportunities.length > 1 ? "s" : ""}</Badge>
             </InlineStack>
 
             {analysis.opportunities.map((opp: any) => {
@@ -715,21 +704,13 @@ export default function ReportPage() {
                 >
                   <BlockStack gap="300">
                     <InlineStack align="space-between" blockAlign="center">
-                      <InlineStack gap="200" blockAlign="center">
-                        <Badge
-                          tone={
-                            opp.priority === "CRITICAL" ? "critical" :
-                            opp.priority === "HIGH" ? "warning" : "info"
-                          }
-                        >
-                          {opp.priority}
-                        </Badge>
-                        <Text variant="headingSm" as="h4">{opp.title}</Text>
-                      </InlineStack>
-                      <Badge tone="success">+{opp.impactPercent}%</Badge>
+                      <Text variant="headingSm" as="h4">{opp.title}</Text>
+                      <Badge tone={opp.priority === "CRITICAL" ? "critical" : opp.priority === "HIGH" ? "warning" : "info"}>
+                        {opp.priority === "CRITICAL" ? "Impact majeur" : opp.priority === "HIGH" ? "Impact élevé" : "Impact modéré"}
+                      </Badge>
                     </InlineStack>
                     <Text variant="bodyMd" as="p">{opp.description}</Text>
-                    <Text variant="bodySm" as="p" tone="success" fontWeight="semibold">
+                    <Text variant="bodySm" as="p" tone="subdued">
                       {opp.estimatedImpact}
                     </Text>
 
@@ -741,12 +722,9 @@ export default function ReportPage() {
                         )}
                       </Banner>
                     )}
-                    {aiResult?.error && (
-                      <Banner tone={aiResult.needsUpgrade ? "warning" : "critical"} title={aiResult.needsUpgrade ? "Plan requis" : "Erreur"}>
+                    {aiResult?.error && !aiResult?.needsUpgrade && (
+                      <Banner tone="critical" title="Erreur">
                         <Text as="p">{aiResult.error}</Text>
-                        {aiResult.needsUpgrade && (
-                          <Button url="/app/billing">Passer au plan Automation+</Button>
-                        )}
                       </Banner>
                     )}
 
@@ -770,7 +748,7 @@ export default function ReportPage() {
                             onClick={() => {
                               setActiveAiOpp(opp.type);
                               if (actions.aiType === "AI_SEO_FIX") {
-                                window.open(selfHref === "/app/seo" ? "/app/seo" : "/app/seo", "_top");
+                                window.open("/app/seo", "_top");
                                 return;
                               }
                               aiFetcher.submit(
@@ -782,14 +760,12 @@ export default function ReportPage() {
                             {actions.aiLabel}
                           </Button>
                         ) : (
-                          <Button
-                            variant="primary"
-                            size="slim"
-                            tone="critical"
-                            url="/app/billing"
-                          >
-                            {actions.aiLabel} (Automation+ requis)
-                          </Button>
+                          <InlineStack gap="100" blockAlign="center">
+                            <Button disabled size="slim">
+                              {actions.aiLabel}
+                            </Button>
+                            <Badge tone="attention">Automation+</Badge>
+                          </InlineStack>
                         )
                       ) : (
                         <Button disabled size="slim" variant="tertiary">

@@ -299,7 +299,7 @@ export default function SeoScanDetailPage() {
       data.set("intent", "mark_fixed");
       data.set("issueId", issueId);
       submit(data, { method: "post" });
-      setToastMessage("Issue marquee comme corrigee.");
+      setToastMessage("Issue marquée comme corrigée.");
       setToastError(false);
       setToastActive(true);
     },

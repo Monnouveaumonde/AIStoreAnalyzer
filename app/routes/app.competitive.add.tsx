@@ -202,28 +202,27 @@ export default function AddCompetitorPage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              {!canAdd && (
+              {actionData?.error ? (
+                <Banner tone="critical">
+                  <Text as="p">{actionData.error}</Text>
+                </Banner>
+              ) : !canAdd ? (
                 <Banner tone="warning">
                   <Text as="p">
                     {reason} ({current}/{limit === -1 ? "illimité" : limit})
                   </Text>
                   <Button url="/app/billing">Upgrader le plan</Button>
                 </Banner>
-              )}
-
-              {actionData?.error && (
-                <Banner tone="critical">
-                  <Text as="p">{actionData.error}</Text>
-                </Banner>
-              )}
-
-              <form id="competitive-add-form" method="post">
-              <FormLayout>
+              ) : (
                 <Banner tone="info">
                   <Text as="p">
                     Sélectionnez un produit, puis renseignez le concurrent et son URL produit.
                   </Text>
                 </Banner>
+              )}
+
+              <form id="competitive-add-form" method="post">
+              <FormLayout>
 
                 {/* Sélection du produit du marchand */}
                 <BlockStack gap="200">
