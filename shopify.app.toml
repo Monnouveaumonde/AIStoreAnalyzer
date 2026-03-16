@@ -3,7 +3,7 @@
 # ⚠️  Remplacer YOUR_CLIENT_ID et les URLs par vos vraies valeurs avant déploiement
 
 name = "ShopPulseAi"
-client_id = "0c5ba79c6026f7b1a5915201ee6891a4"
+client_id = "0ca3302982b75a281ba7c86a52a2b747"
 application_url = "https://aistoreanalyzer-production.up.railway.app"
 # false = app en nouvel onglet (évite accounts.shopify.com et admin.shopify.com dans iframe)
 embedded = true
