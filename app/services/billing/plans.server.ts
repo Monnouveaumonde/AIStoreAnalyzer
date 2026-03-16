@@ -97,10 +97,15 @@ export async function createSubscription(
 
   if (result?.userErrors?.length > 0) {
     console.error("Billing errors:", result.userErrors);
-    return null;
+    throw new Error(`Billing: ${result.userErrors.map((e: any) => e.message).join(", ")}`);
   }
 
-  return result?.confirmationUrl || null;
+  if (!result?.confirmationUrl) {
+    console.error("Billing: pas de confirmationUrl", JSON.stringify(data));
+    throw new Error("Shopify n'a pas retourné d'URL de confirmation.");
+  }
+
+  return result.confirmationUrl;
 }
 
 export async function createAutomationAddonSubscription(
@@ -145,9 +150,13 @@ export async function createAutomationAddonSubscription(
   const result = data.data?.appSubscriptionCreate;
   if (result?.userErrors?.length > 0) {
     console.error("Addon billing errors:", result.userErrors);
-    return null;
+    throw new Error(`Addon: ${result.userErrors.map((e: any) => e.message).join(", ")}`);
   }
-  return result?.confirmationUrl || null;
+  if (!result?.confirmationUrl) {
+    console.error("Addon billing: pas de confirmationUrl", JSON.stringify(data));
+    throw new Error("Shopify n'a pas retourné d'URL de confirmation pour Automation+.");
+  }
+  return result.confirmationUrl;
 }
 
 export async function checkAndResetMonthlyLimits(shopDomain: string): Promise<void> {

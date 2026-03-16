@@ -66,9 +66,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: true, message: "Automation+ désactivé." });
     }
 
-    const confirmationUrl = await createAutomationAddonSubscription(admin, session.shop);
-    if (confirmationUrl) return redirect(confirmationUrl);
-    return json({ error: "Erreur lors de l'activation d'Automation+." }, { status: 500 });
+    try {
+      const confirmationUrl = await createAutomationAddonSubscription(admin, session.shop);
+      if (confirmationUrl) return redirect(confirmationUrl);
+      return json({ error: "Erreur lors de l'activation d'Automation+." }, { status: 500 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erreur inconnue";
+      return json({ error: msg }, { status: 500 });
+    }
   }
 
   const plan = formData.get("plan") as PlanType;
@@ -85,13 +90,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ success: true, message: "Plan mis à jour vers Free" });
   }
 
-  const confirmationUrl = await createSubscription(admin, plan, session.shop);
-
-  if (confirmationUrl) {
-    return redirect(confirmationUrl);
+  try {
+    const confirmationUrl = await createSubscription(admin, plan, session.shop);
+    if (confirmationUrl) {
+      return redirect(confirmationUrl);
+    }
+    return json({ error: "Erreur lors de la création de l'abonnement." }, { status: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Erreur inconnue";
+    return json({ error: msg }, { status: 500 });
   }
-
-  return json({ error: "Erreur lors de la création de l'abonnement" }, { status: 500 });
 };
 
 function PlanCard({
