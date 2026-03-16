@@ -599,9 +599,8 @@ const OPP_ACTIONS: Record<string, { adminPath: string | null; externalUrl: strin
   UX_IMPROVEMENT: { adminPath: "pages", externalUrl: null, appUrl: null, selfLabel: "Gérer mes pages", aiType: "AI_CREATE_PAGES", aiLabel: "Créer les pages manquantes par IA" },
 };
 
-function buildAdminUrl(shopDomain: string, path: string): string {
-  const storeName = shopDomain.replace(".myshopify.com", "");
-  return `https://admin.shopify.com/store/${storeName}/${path}`;
+function buildAdminUrl(_shopDomain: string, path: string): string {
+  return `shopify:admin/${path}`;
 }
 
 export default function ReportPage() {
@@ -702,7 +701,7 @@ export default function ReportPage() {
                   : actions.adminPath
                     ? buildAdminUrl(shopDomain, actions.adminPath)
                     : "#";
-              const isExternal = !!actions.externalUrl || !!actions.adminPath;
+              const isExternal = !!actions.externalUrl;
 
               const aiResult = aiFetcher.state === "idle" && aiFetcher.data && activeAiOpp === opp.type ? aiFetcher.data : null;
 
